@@ -29,7 +29,77 @@ npm run build   # verificacion de compilacion
 npm run dev     # http://localhost:3000
 ```
 
-Rutas: `/` (inicio) · `/pos` (cajero) · `/kds` (cocina) · `/reportes` (reportes).
+Rutas: `/` (inicio) · `/pos` (cajero) · `/kds` (cocina) · `/reportes` (reportes) ·
+`/empleados` (personal) · `/nomina` (nomina).
+
+## Modulo de Empleados y Nomina
+
+Dos "sombreros" con responsabilidades separadas (codigo, tipos y comentarios de
+cada archivo lo dejan explicito):
+
+- **rrhh-personal-pos**: ciclo de vida del empleado (onboarding, edicion, baja
+  logica), turnos/horarios programados y asistencia (reloj checador). Archivos:
+  `lib/domain/types.ts` (Empleado, HorarioTurno, Marcaje), `lib/data/rrhh-seed.ts`,
+  `lib/rrhh/*`, `app/api/v1/empleados/**`, `app/api/v1/asistencia/**`,
+  `components/empleados/*`, `app/empleados/*`.
+- **nomina-pos**: calculo de nomina a partir de la asistencia (horas
+  regulares/extra), propinas, retencion fiscal DEMO y recibos de pago.
+  Archivos: `lib/nomina/*`, `app/api/v1/nomina/**`, `components/nomina/api.ts`,
+  `app/nomina/*`.
+
+### Que se construyo
+
+- **Empleado**: alta en estado `onboarding` (sin acceso de login todavia) ->
+  `completarOnboarding` crea el `Usuario` (PIN + rol + tienda) y pasa a
+  `activo` -> `darDeBaja` es una **baja logica** (`inactivo` + motivo; nunca se
+  borra el registro, porque nomina/auditoria dependen de el; tambien desactiva
+  el `Usuario` de login).
+- **HorarioTurno**: turno de trabajo PROGRAMADO de un empleado. Es un concepto
+  **distinto** del `Turno` de caja/registradora ya existente (apertura/cierre
+  Z): no se reutilizan entre si, para evitar confundir "turno de trabajo" con
+  "turno de caja".
+- **Marcaje (reloj checador)**: entrada/salida con timestamp, ubicacion,
+  `dentroDeGeofence` e `identidadVerificada` (ambos **simulados** desde la UI
+  con checkboxes "simular fuera de zona" / "simular fallo de verificacion") y
+  `tardanza` (calculada contra el `HorarioTurno` del dia, si existe, con 10 min
+  de tolerancia DEMO). Se audita una alerta (`alertaAsistencia`) solo cuando
+  hay tardanza, fuera de geofence o identidad no verificada.
+- **Nomina**: `lib/nomina/calculo.ts` empareja marcajes entrada/salida
+  (`lib/rrhh/asistencia.ts:emparejarIntervalos`), agrupa minutos por semana
+  ISO (lunes-domingo) dentro del periodo pedido, separa horas regulares vs.
+  extra (regla DEMO: >40h/semana, estilo FLSA federal, igual para FL y TX),
+  suma propinas del periodo y aplica una retencion DEMO. Genera un
+  `ReciboDePago` por empleado (auditado con evento `nominaGenerada`).
+
+### Decision de modelado: como se ligan propinas a un empleado
+
+El `Pedido`/`Pago` existentes **no tienen** un campo "atendido por" a nivel de
+linea o pago individual; la unica asociacion disponible en el modelo actual es
+`Pago.turnoId -> Turno.usuarioAperturaId` (el cajero que abrio el turno de
+caja). Por eso `nomina-pos` calcula propinas como: para el `Usuario` ligado al
+`Empleado` (`Empleado.usuarioId`), busca los `Turno` que ese usuario abrio, y
+suma `Pago.propina` (estado `aprobado`) de los pagos de esos turnos dentro del
+periodo. **Simplificacion DEMO documentada**: en produccion cada `Pago`/linea
+deberia registrar directamente que cajero/empleado atendio la venta (no
+inferirlo por quien abrio el turno), sobre todo si varios cajeros comparten un
+mismo turno de caja.
+
+Dos empleados semilla (`emp-ana-cajero`, `emp-carlos-gerente`) reutilizan a
+proposito los `Usuario` demo ya sembrados (`user-cajero-demo`,
+`user-gerente-demo`) para que los pagos que genera la demo normal de `/pos`
+(que abre turno con esos usuarios) se puedan liquidar de inmediato en
+`/nomina` sin pasos adicionales.
+
+### Que es MOCK / DEMO (reemplazar antes de produccion)
+
+| Area | Que es demo | Reemplazar por |
+|------|-------------|----------------|
+| **Reloj checador** | Marcaje manual desde la UI de `/empleados/[id]`; `dentroDeGeofence`/`identidadVerificada` son checkboxes que SIMULAN el resultado. | Integracion real con el proveedor de time-clock (ej. **XmartClock** u otro): webhook o pull periodico de eventos de marcaje, con geofencing GPS real y verificacion de identidad (ej. reconocimiento facial) del lado del proveedor. Este modulo modela el mismo contrato de datos (empleado, timestamp, ubicacion, flags de alerta) para que el reemplazo sea principalmente de "fuente de los Marcaje", no de modelo. |
+| **Retencion fiscal** | 10% "federal" fijo y ficticio sobre el bruto (propinas no se retienen en esta demo). FL/TX sin impuesto estatal a ingreso personal (eso si es real). | Tabla de retencion federal real (W-4, brackets), reglas de FICA/Medicare, y confirmacion legal/contable de como se retienen propinas reportadas. |
+| **Horas extra** | Regla unica ">40h/semana = 1.5x" (estilo FLSA federal), igual para FL y TX. | Validar reglas estatales/locales aplicables y politica interna de horas extra (ej. doble tiempo en feriados, reglas de descanso). |
+| **Emparejamiento de marcajes** | Se asume que los marcajes de un empleado alternan correctamente entrada/salida (lo valida `registrarMarcaje`); un turno sin marcaje de salida dentro del periodo se descarta del calculo. | Deteccion/alerta de "olvido de marcaje" con reglas de negocio (ej. auto-cierre a las N horas) y correccion manual auditada. |
+| **Propinas -> empleado** | Se infiere via `Turno.usuarioAperturaId` (ver decision de modelado arriba). | Registrar el cajero/empleado directamente en `Pago` o `LineaDePedido`. |
+| **PIN / auth del empleado** | Mismo hash de demo que el resto del sistema (`demo:<pin>`). | bcrypt/argon2 (S-10, ya documentado). |
 
 ## Mocks y datos DEMO — REEMPLAZAR ANTES DE PRODUCCION
 
@@ -51,18 +121,24 @@ Rutas: `/` (inicio) · `/pos` (cajero) · `/kds` (cocina) · `/reportes` (report
   /pos                    UI cajero              [frontend-mostrador-kiosco-pos]
   /kds                    UI cocina              [kds-cocina-pos]
   /reportes               UI reportes            [reportes-analitica-pos, fase 3]
+  /empleados              UI personal/asistencia [rrhh-personal-pos]
+  /nomina                 UI nomina              [nomina-pos]
   /api/v1/...             route handlers REST    (ver dueno por recurso)
 /lib
   /domain/types.ts        contrato de tipos      [orquestador]  (no editar firmas)
   /db/store.ts            almacen en memoria     [orquestador]  (no redefinir colecciones)
   /data/catalog.ts        semilla de catalogo    [menu-inventario-pos]
+  /data/rrhh-seed.ts      semilla de personal    [rrhh-personal-pos]
   /inventory/*            logica de inventario   [menu-inventario-pos]
   /sales/*                motor de ticket/total  [backend-ventas-pos]
   /payments/*             PSP mock + pagos       [pagos-pos]
   /kitchen/*              estado de cocina       [kds-cocina-pos]
+  /rrhh/*                 empleados + asistencia [rrhh-personal-pos]
+  /nomina/*               calculo de nomina      [nomina-pos]
   /hardware/*             stubs de perifericos   [hardware-perifericos-pos, fase 3]
 /public/cropped-Logo.webp logo real de marca
 ```
 
 Reglas: dinero en **centavos enteros**; nombres del modelo en espanol (C-NOMBRES);
-`backend-ventas` es el **unico** que calcula total/impuesto/saldo.
+`backend-ventas` es el **unico** que calcula total/impuesto/saldo; `nomina-pos` es el
+**unico** que calcula pago/retencion de personal.

@@ -1,0 +1,190 @@
+/**
+ * Cliente HTTP del modulo de Empleados/Asistencia (rrhh-personal-pos).
+ *
+ * REGLA DURA (igual que components/pos/api.ts): este modulo SOLO habla con el
+ * backend via `fetch` a /api/v1/... Nunca importa lib/db ni lib/rrhh (romperia
+ * el bundle de cliente). Tipos de dominio importados con `import type`.
+ */
+
+import type { Empleado, Marcaje, Rol, Ubicacion } from "@/lib/domain/types";
+import type { IntervaloTrabajado } from "@/lib/rrhh/asistencia";
+
+const BASE_URL = "/api/v1";
+
+export class ErrorApi extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ErrorApi";
+    this.status = status;
+  }
+}
+
+async function leerCuerpoSeguro(res: Response): Promise<unknown> {
+  const texto = await res.text().catch(() => "");
+  if (!texto) return null;
+  try {
+    return JSON.parse(texto);
+  } catch {
+    return null;
+  }
+}
+
+function extraerMensajeError(cuerpo: unknown, status: number): string {
+  if (cuerpo && typeof cuerpo === "object") {
+    const registro = cuerpo as Record<string, unknown>;
+    const candidato = registro.mensaje ?? registro.error ?? registro.message;
+    if (typeof candidato === "string" && candidato.trim()) return candidato;
+  }
+  if (status === 0) {
+    return "No hay conexion con el servidor. Verifica la red e intenta de nuevo.";
+  }
+  return `Ocurrio un error inesperado (codigo ${status}). Intenta de nuevo.`;
+}
+
+async function solicitar<T>(ruta: string, init?: RequestInit): Promise<T> {
+  let respuesta: Response;
+  try {
+    respuesta = await fetch(`${BASE_URL}${ruta}`, {
+      ...init,
+      headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+      cache: "no-store",
+    });
+  } catch {
+    throw new ErrorApi("No hay conexion con el servidor. Revisa tu red e intenta de nuevo.", 0);
+  }
+
+  const cuerpo = await leerCuerpoSeguro(respuesta);
+  if (!respuesta.ok) {
+    throw new ErrorApi(extraerMensajeError(cuerpo, respuesta.status), respuesta.status);
+  }
+  return cuerpo as T;
+}
+
+export interface NuevoEmpleadoBody {
+  ubicacionId: string;
+  nombre: string;
+  email: string;
+  telefono: string;
+  rolId: string;
+  fechaContratacion?: string;
+  tarifaHoraCentavos: number;
+}
+
+export interface EditarEmpleadoBody {
+  nombre?: string;
+  email?: string;
+  telefono?: string;
+  rolId?: string;
+  ubicacionId?: string;
+  tarifaHoraCentavos?: number;
+}
+
+export async function listarEmpleados(filtro?: {
+  ubicacionId?: string;
+  estado?: string;
+}): Promise<Empleado[]> {
+  const qs = new URLSearchParams();
+  if (filtro?.ubicacionId) qs.set("ubicacionId", filtro.ubicacionId);
+  if (filtro?.estado) qs.set("estado", filtro.estado);
+  const query = qs.toString();
+  const { empleados } = await solicitar<{ empleados: Empleado[] }>(
+    `/empleados${query ? `?${query}` : ""}`
+  );
+  return empleados;
+}
+
+export async function obtenerEmpleado(id: string): Promise<Empleado> {
+  const { empleado } = await solicitar<{ empleado: Empleado }>(`/empleados/${id}`);
+  return empleado;
+}
+
+export async function crearEmpleado(body: NuevoEmpleadoBody): Promise<Empleado> {
+  const { empleado } = await solicitar<{ empleado: Empleado }>("/empleados", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  return empleado;
+}
+
+export async function editarEmpleado(id: string, body: EditarEmpleadoBody): Promise<Empleado> {
+  const { empleado } = await solicitar<{ empleado: Empleado }>(`/empleados/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  return empleado;
+}
+
+export async function completarOnboarding(id: string, pin: string): Promise<Empleado> {
+  const { empleado } = await solicitar<{ empleado: Empleado }>(`/empleados/${id}/onboarding`, {
+    method: "POST",
+    body: JSON.stringify({ pin }),
+  });
+  return empleado;
+}
+
+export async function darDeBajaEmpleado(id: string, motivo: string): Promise<Empleado> {
+  const { empleado } = await solicitar<{ empleado: Empleado }>(`/empleados/${id}/baja`, {
+    method: "POST",
+    body: JSON.stringify({ motivo }),
+  });
+  return empleado;
+}
+
+export async function listarRoles(): Promise<Rol[]> {
+  const { roles } = await solicitar<{ roles: Rol[] }>("/roles");
+  return roles;
+}
+
+export async function listarUbicaciones(): Promise<Ubicacion[]> {
+  const { ubicaciones } = await solicitar<{ ubicaciones: Ubicacion[] }>("/ubicaciones");
+  return ubicaciones;
+}
+
+export interface MarcarAsistenciaBody {
+  empleadoId: string;
+  tipo: "entrada" | "salida";
+  simularFueraDeZona?: boolean;
+  simularFalloIdentidad?: boolean;
+}
+
+export async function registrarMarcaje(body: MarcarAsistenciaBody): Promise<Marcaje> {
+  const { marcaje } = await solicitar<{ marcaje: Marcaje }>("/asistencia", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  return marcaje;
+}
+
+export async function listarMarcajes(filtro: {
+  empleadoId?: string;
+  desde?: string;
+  hasta?: string;
+}): Promise<Marcaje[]> {
+  const qs = new URLSearchParams();
+  if (filtro.empleadoId) qs.set("empleadoId", filtro.empleadoId);
+  if (filtro.desde) qs.set("desde", filtro.desde);
+  if (filtro.hasta) qs.set("hasta", filtro.hasta);
+  const { marcajes } = await solicitar<{ marcajes: Marcaje[] }>(`/asistencia?${qs.toString()}`);
+  return marcajes;
+}
+
+export interface ResumenHorasResponse {
+  empleadoId: string;
+  desde: string;
+  hasta: string;
+  minutosTrabajados: number;
+  intervalos: IntervaloTrabajado[];
+}
+
+export async function obtenerResumenHoras(
+  empleadoId: string,
+  desde: string,
+  hasta: string
+): Promise<ResumenHorasResponse> {
+  const qs = new URLSearchParams({ empleadoId, desde, hasta });
+  const { resumen } = await solicitar<{ resumen: ResumenHorasResponse }>(
+    `/asistencia/resumen?${qs.toString()}`
+  );
+  return resumen;
+}

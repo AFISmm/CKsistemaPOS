@@ -6,6 +6,8 @@ export default function Home() {
     { href: "/pos", titulo: "Terminal de Cajero", desc: "Tomar y cobrar pedidos de mostrador" },
     { href: "/kds", titulo: "Pantalla de Cocina (KDS)", desc: "Ver y avanzar comandas" },
     { href: "/reportes", titulo: "Reportes del dia", desc: "Ventas, mix y arqueo (demo)" },
+    { href: "/empleados", titulo: "Empleados", desc: "Onboarding, turnos y asistencia (reloj checador demo)" },
+    { href: "/nomina", titulo: "Nomina", desc: "Calculo de pago por periodo (demo)" },
   ];
 
   return (

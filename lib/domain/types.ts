@@ -59,7 +59,98 @@ export type TipoEventoAuditoria =
   | "producto86"
   | "cierreZ"
   | "ventaConfirmada"
-  | "pagoRegistrado";
+  | "pagoRegistrado"
+  // ---- Modulo Empleados/Nomina (rrhh-personal-pos / nomina-pos) ----
+  | "altaEmpleado"
+  | "bajaEmpleado"
+  | "cambioRolEmpleado"
+  | "alertaAsistencia"
+  | "nominaGenerada";
+
+// ---------- Empleados / turnos de trabajo / asistencia (owner: rrhh-personal-pos) ----------
+// NOTA DE NOMBRES: `Turno` (arriba) es el turno DE CAJA/registradora (apertura/cierre Z).
+// `HorarioTurno` es el turno DE TRABAJO programado de un Empleado. Son conceptos
+// distintos y no deben confundirse ni reutilizarse entre si.
+
+export type EstadoEmpleado = "onboarding" | "activo" | "inactivo";
+
+export interface Empleado {
+  id: string;
+  ubicacionId: string;
+  nombre: string;
+  email: string;
+  telefono: string;
+  rolId: string;
+  fechaContratacion: string; // ISO date (YYYY-MM-DD)
+  estado: EstadoEmpleado;
+  /** Tarifa por hora en CENTAVOS (C-DINERO), usada por nomina-pos. */
+  tarifaHoraCentavos: number;
+  /** Link opcional al Usuario de login (rol RBAC/PIN). Se crea al completar onboarding. */
+  usuarioId: string | null;
+  /** Motivo de baja (solo si estado === "inactivo"). */
+  motivoBaja: string | null;
+  creadoEn: string;
+}
+
+/** Turno de trabajo PROGRAMADO de un empleado (no confundir con `Turno` de caja). */
+export interface HorarioTurno {
+  id: string;
+  empleadoId: string;
+  ubicacionId: string;
+  fecha: string; // ISO date (YYYY-MM-DD)
+  horaInicioProgramada: string; // "HH:MM" 24h, hora local de la tienda (demo)
+  horaFinProgramada: string; // "HH:MM" 24h
+}
+
+export type TipoMarcaje = "entrada" | "salida";
+
+/**
+ * Evento de reloj checador (marcaje). Modelo inspirado en proveedores tipo
+ * XmartClock (marcaje movil/desktop, geofencing, verificacion de identidad),
+ * pero es 100% DEMO: `dentroDeGeofence` e `identidadVerificada` son flags
+ * SIMULADOS desde la UI (checkboxes "simular fuera de zona" / "simular fallo
+ * de verificacion"), no hay GPS ni reconocimiento facial real. Ver README-DEMO.md.
+ */
+export interface Marcaje {
+  id: string;
+  empleadoId: string;
+  ubicacionId: string;
+  tipo: TipoMarcaje;
+  timestamp: string; // ISO datetime
+  /** Simulado: true = dentro del geofence de la tienda. */
+  dentroDeGeofence: boolean;
+  /** Simulado: true = identidad verificada (ej. reconocimiento facial mock). */
+  identidadVerificada: boolean;
+  /** Calculado contra HorarioTurno del dia (si existe) al momento del marcaje "entrada". */
+  tardanza: boolean;
+}
+
+/**
+ * Recibo de pago (paystub) — owner: nomina-pos.
+ * Dinero en CENTAVOS enteros (C-DINERO); horas en MINUTOS enteros (mismo
+ * principio: nunca floats para cantidades que se suman/reportan).
+ */
+export interface ReciboDePago {
+  id: string;
+  empleadoId: string;
+  periodoInicio: string; // ISO date (YYYY-MM-DD), inclusive
+  periodoFin: string; // ISO date (YYYY-MM-DD), inclusive
+  horasRegularesMin: number; // minutos enteros
+  horasExtraMin: number; // minutos enteros
+  propinasCentavos: number;
+  brutoCentavos: number; // salario (regular + extra), sin propinas
+  retencionCentavos: number; // retencion DEMO (ver lib/nomina/calculo.ts)
+  netoCentavos: number; // bruto - retencion + propinas
+  generadoEn: string; // ISO datetime
+}
+
+/** Semilla demo de personal (owner: rrhh-personal-pos), analoga a SeedCatalogo. */
+export interface SeedRrhh {
+  empleados: Empleado[];
+  horariosTurno: HorarioTurno[];
+  /** Marcajes historicos (ultimas ~2 semanas) para poder correr nomina de demo sin marcar manualmente. */
+  marcajesIniciales: Marcaje[];
+}
 
 // ---------- Entidades ----------
 

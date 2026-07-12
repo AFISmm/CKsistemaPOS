@@ -15,16 +15,20 @@
 import type {
   Categoria,
   Combo,
+  Empleado,
   EventoDeAuditoria,
   GrupoModificador,
+  HorarioTurno,
   Insumo,
   LineaDePedido,
   LineaModificador,
+  Marcaje,
   Modificador,
   Pago,
   Pedido,
   Producto,
   Receta,
+  ReciboDePago,
   RecetaInsumo,
   ReglaDeImpuesto,
   Rol,
@@ -34,6 +38,7 @@ import type {
   Usuario,
 } from "../domain/types";
 import { getSeedCatalogo } from "../data/catalog";
+import { getSeedRrhh, usuariosAdicionalesRrhh } from "../data/rrhh-seed";
 
 export interface Db {
   ubicaciones: Ubicacion[];
@@ -53,6 +58,11 @@ export interface Db {
   usuarios: Usuario[];
   roles: Rol[];
   eventos: EventoDeAuditoria[];
+  // ---- Modulo Empleados/Nomina (owner: rrhh-personal-pos / nomina-pos) ----
+  empleados: Empleado[];
+  horariosTurno: HorarioTurno[];
+  marcajes: Marcaje[];
+  recibosPago: ReciboDePago[];
   seeded: boolean;
 }
 
@@ -92,6 +102,10 @@ function crearDbVacia(): Db {
     usuarios: [],
     roles: [],
     eventos: [],
+    empleados: [],
+    horariosTurno: [],
+    marcajes: [],
+    recibosPago: [],
     seeded: false,
   };
 }
@@ -216,6 +230,16 @@ function sembrar(db: Db): void {
       actualizadoEn: ahora(),
     });
   }
+
+  // Personal DEMO (owner: rrhh-personal-pos): empleados, horarios y marcajes
+  // historicos. Dos empleados reutilizan los Usuario de login ya sembrados
+  // arriba (cajero/gerente demo) para que las propinas de la demo de POS se
+  // puedan liquidar de inmediato en /nomina; el resto trae su propio Usuario.
+  db.usuarios.push(...usuariosAdicionalesRrhh);
+  const rrhh = getSeedRrhh();
+  db.empleados.push(...rrhh.empleados);
+  db.horariosTurno.push(...rrhh.horariosTurno);
+  db.marcajes.push(...rrhh.marcajesIniciales);
 
   // Turno abierto en la tienda piloto (para poder vender desde el arranque)
   db.turnos.push({

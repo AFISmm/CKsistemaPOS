@@ -26,7 +26,7 @@ todo el equipo los comparta y los mejore con el tiempo.
 El punto de entrada recomendado es el coordinador:
 `Usa el subagente orquestador-pos para planificar el proyecto POS.`
 
-## Los 14 agentes
+## Los 16 agentes
 
 | # | Agente | Rol |
 |---|--------|-----|
@@ -44,6 +44,8 @@ El punto de entrada recomendado es el coordinador:
 | 11 | `hardware-perifericos-pos` | Impresoras, cajón, lector, escáner, pantallas |
 | 12 | `qa-pruebas-pos` | Pruebas y casos límite |
 | 13 | `devops-despliegue-pos` | CI/CD, despliegue multi-tienda, respaldos, monitoreo |
+| 14 | `rrhh-personal-pos` | Onboarding, ciclo de vida del empleado, turnos y asistencia (time clock) |
+| 15 | `nomina-pos` | Cálculo de nómina, propinas, retenciones fiscales, recibos de pago |
 
 ## Flujo por fases
 
@@ -52,7 +54,8 @@ El punto de entrada recomendado es el coordinador:
 - **Fase 2 — Núcleo (paralelo):** `backend-ventas-pos`, `menu-inventario-pos`,
   `pagos-pos`, `kds-cocina-pos`, `frontend-mostrador-kiosco-pos`
 - **Fase 3 — Refuerzo:** `integraciones-canales-pos`, `reportes-analitica-pos`,
-  `seguridad-accesos-pos`, `hardware-perifericos-pos`
+  `seguridad-accesos-pos`, `hardware-perifericos-pos`, `rrhh-personal-pos`,
+  `nomina-pos`
 - **Fase 4 — Cierre:** `qa-pruebas-pos` → `devops-despliegue-pos`
 
 ## Notas
