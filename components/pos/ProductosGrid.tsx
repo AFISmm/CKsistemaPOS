@@ -2,6 +2,7 @@
 
 import type { Producto } from "@/lib/domain/types";
 import { formatearDinero } from "@/lib/domain/types";
+import { useI18n } from "@/lib/shell/I18nProvider";
 
 interface Props {
   productos: Producto[];
@@ -14,10 +15,11 @@ interface Props {
  * pulsar por error, sin necesidad de leer texto para saber que no aplica.
  */
 export default function ProductosGrid({ productos, onSeleccionar }: Props) {
+  const { t } = useI18n();
   const visibles = productos.filter((p) => p.activo);
 
   if (visibles.length === 0) {
-    return <p className="p-4 text-sm text-neutral-500">Esta categoria no tiene productos.</p>;
+    return <p className="p-4 text-sm text-neutral-500">{t("pos.productos.vacio")}</p>;
   }
 
   return (
@@ -46,7 +48,7 @@ export default function ProductosGrid({ productos, onSeleccionar }: Props) {
               </span>
               {agotado && (
                 <span className="rounded bg-neutral-300 px-2 py-0.5 text-xs font-semibold text-neutral-700">
-                  Agotado
+                  {t("pos.productos.agotado")}
                 </span>
               )}
             </div>

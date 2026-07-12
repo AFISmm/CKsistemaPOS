@@ -21,8 +21,9 @@
 
 import { useEffect, useState } from "react";
 import { useI18n } from "@/lib/shell/I18nProvider";
+import { textoErrorApi } from "@/lib/i18n/erroresApi";
 import { listarUbicaciones } from "@/components/empleados/api";
-import { obtenerCodigoVigente, ErrorApi } from "@/components/jornada/api";
+import { obtenerCodigoVigente } from "@/components/jornada/api";
 import type { Ubicacion } from "@/lib/domain/types";
 
 const PERIODO_TOTP_SEG = 10;
@@ -67,7 +68,7 @@ export default function PantallaJornadaPage() {
         setSegundosRestantes(vigente.segundosRestantes);
         setError(null);
       } catch (err) {
-        if (vivo) setError(err instanceof ErrorApi ? err.message : t("jornada.pantalla.errorCodigo"));
+        if (vivo) setError(textoErrorApi(err, t, "jornada.pantalla.errorCodigo"));
       }
     }
 

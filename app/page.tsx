@@ -1,13 +1,18 @@
+"use client";
+
 import Link from "next/link";
 import Image from "next/image";
+import { useI18n } from "@/lib/shell/I18nProvider";
 
 export default function Home() {
+  const { t } = useI18n();
+
   const tiles = [
-    { href: "/pos", titulo: "Terminal de Cajero", desc: "Tomar y cobrar pedidos de mostrador" },
-    { href: "/kds", titulo: "Pantalla de Cocina (KDS)", desc: "Ver y avanzar comandas" },
-    { href: "/reportes", titulo: "Reportes del dia", desc: "Ventas, mix y arqueo (demo)" },
-    { href: "/empleados", titulo: "Empleados", desc: "Onboarding, turnos y asistencia (reloj checador demo)" },
-    { href: "/nomina", titulo: "Nomina", desc: "Calculo de pago por periodo (demo)" },
+    { href: "/pos", titulo: t("home.tilePosTitulo"), desc: t("home.tilePosDesc") },
+    { href: "/kds", titulo: t("home.tileKdsTitulo"), desc: t("home.tileKdsDesc") },
+    { href: "/reportes", titulo: t("home.tileReportesTitulo"), desc: t("home.tileReportesDesc") },
+    { href: "/empleados", titulo: t("home.tileEmpleadosTitulo"), desc: t("home.tileEmpleadosDesc") },
+    { href: "/nomina", titulo: t("home.tileNominaTitulo"), desc: t("home.tileNominaDesc") },
   ];
 
   return (
@@ -20,27 +25,25 @@ export default function Home() {
           height={90}
           priority
         />
-        <h1 className="text-2xl font-bold text-ck-dark">Sistema POS — DEMO</h1>
+        <h1 className="text-2xl font-bold text-ck-dark">{t("home.titulo")}</h1>
         <p className="max-w-xl text-center text-sm text-neutral-600">
-          Demo funcional end-to-end (mostrador &rarr; cocina &rarr; cobro &rarr;
-          inventario). Estado en memoria, PSP y hardware simulados. No es la
-          arquitectura de produccion aprobada.
+          {t("home.descripcion")}
         </p>
       </div>
       <div className="grid w-full max-w-3xl gap-4 sm:grid-cols-3">
-        {tiles.map((t) => (
+        {tiles.map((tile) => (
           <Link
-            key={t.href}
-            href={t.href}
+            key={tile.href}
+            href={tile.href}
             className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm transition hover:border-ck-red hover:shadow-md"
           >
-            <div className="text-lg font-semibold text-ck-red">{t.titulo}</div>
-            <div className="mt-1 text-sm text-neutral-600">{t.desc}</div>
+            <div className="text-lg font-semibold text-ck-red">{tile.titulo}</div>
+            <div className="mt-1 text-sm text-neutral-600">{tile.desc}</div>
           </Link>
         ))}
       </div>
       <p className="mt-10 text-xs text-neutral-400">
-        Chicken Kitchen &middot; Tienda piloto: Miami, FL (15738 SW 72nd St)
+        {t("home.footer")}
       </p>
     </main>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import type { Categoria } from "@/lib/domain/types";
+import { useI18n } from "@/lib/shell/I18nProvider";
 
 interface Props {
   categorias: Categoria[];
@@ -13,16 +14,17 @@ interface Props {
  * Botones de toque amplio (min 56px alto) para uso rapido en pantalla tactil.
  */
 export default function CategoriasTabs({ categorias, categoriaActivaId, onSeleccionar }: Props) {
+  const { t } = useI18n();
   const activas = categorias.filter((c) => c.activo).sort((a, b) => a.orden - b.orden);
 
   if (activas.length === 0) {
     return (
-      <p className="p-4 text-sm text-neutral-500">No hay categorias en el catalogo.</p>
+      <p className="p-4 text-sm text-neutral-500">{t("pos.categorias.vacio")}</p>
     );
   }
 
   return (
-    <div className="flex gap-2 overflow-x-auto pb-2" role="tablist" aria-label="Categorias del menu">
+    <div className="flex gap-2 overflow-x-auto pb-2" role="tablist" aria-label={t("pos.categorias.ariaLabel")}>
       {activas.map((cat) => {
         const activa = cat.id === categoriaActivaId;
         return (

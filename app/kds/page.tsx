@@ -21,6 +21,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Pedido } from "@/lib/domain/types";
+import { useI18n } from "@/lib/shell/I18nProvider";
 import OrderCard from "@/components/kds/OrderCard";
 import {
   GRACIA_LISTO_MS,
@@ -42,6 +43,7 @@ interface EntradaCola {
 }
 
 export default function KdsPage() {
+  const { t } = useI18n();
   const [entradas, setEntradas] = useState<Record<string, EntradaCola>>({});
   const [ahoraMs, setAhoraMs] = useState<number>(() => Date.now());
   const [conError, setConError] = useState(false);
@@ -206,17 +208,16 @@ export default function KdsPage() {
       <header className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-neutral-800 pb-3">
         <div>
           <h1 className="text-3xl font-black tracking-tight text-white">
-            Cocina <span className="text-ck-red">—</span> Chicken Kitchen
+            {t("kds.titulo")} <span className="text-ck-red">—</span> Chicken Kitchen
           </h1>
           <p className="text-sm text-neutral-400">
-            KDS · sincronizacion cada {(POLLING_MS / 1000).toFixed(1)}s (demo;
-            produccion = WebSocket, ADR-0003)
+            {t("kds.sync", { seg: (POLLING_MS / 1000).toFixed(1) })}
           </p>
         </div>
         <div className="flex items-center gap-6">
           <div className="text-right">
             <div className="text-xs uppercase tracking-wide text-neutral-500">
-              Comandas activas
+              {t("kds.comandasActivas")}
             </div>
             <div className="text-3xl font-black text-white">
               {visibles.length}
@@ -224,7 +225,7 @@ export default function KdsPage() {
           </div>
           <div className="rounded-xl bg-neutral-900 px-4 py-2 text-right">
             <div className="text-xs uppercase tracking-wide text-neutral-500">
-              Hora
+              {t("kds.hora")}
             </div>
             <div className="font-mono text-2xl font-bold tabular-nums text-white">
               {formatearReloj(ahoraMs)}
@@ -238,19 +239,18 @@ export default function KdsPage() {
           role="status"
           className="mb-4 rounded-lg border border-red-700 bg-red-950 px-4 py-2 text-sm font-semibold text-red-300"
         >
-          Sin conexion con el servidor de pedidos. Mostrando la ultima cola
-          conocida (modo offline) — se reintenta automaticamente.
+          {t("kds.sinConexionBanner")}
         </div>
       )}
 
       {cargandoInicial ? (
         <div className="grid place-items-center py-24 text-xl text-neutral-500">
-          Cargando comandas…
+          {t("kds.cargandoComandas")}
         </div>
       ) : visibles.length === 0 ? (
         <div className="grid place-items-center py-24 text-center text-neutral-500">
-          <div className="text-2xl font-bold">Sin comandas pendientes</div>
-          <div className="mt-1 text-sm">La cocina esta al dia.</div>
+          <div className="text-2xl font-bold">{t("kds.sinComandas")}</div>
+          <div className="mt-1 text-sm">{t("kds.cocinaAlDia")}</div>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

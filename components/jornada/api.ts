@@ -62,7 +62,11 @@ async function solicitar<T>(ruta: string, init?: RequestInit): Promise<T> {
       cache: "no-store",
     });
   } catch {
-    throw new ErrorApi("No hay conexion con el servidor. Revisa tu red e intenta de nuevo.", 0);
+    throw new ErrorApi(
+      "No hay conexion con el servidor. Revisa tu red e intenta de nuevo.",
+      0,
+      "SIN_CONEXION"
+    );
   }
 
   const cuerpo = await leerCuerpoSeguro(respuesta);
@@ -70,7 +74,7 @@ async function solicitar<T>(ruta: string, init?: RequestInit): Promise<T> {
     throw new ErrorApi(
       extraerMensajeError(cuerpo, respuesta.status),
       respuesta.status,
-      extraerCodigoError(cuerpo)
+      extraerCodigoError(cuerpo) ?? "ERROR_INESPERADO_CLIENTE"
     );
   }
   return cuerpo as T;

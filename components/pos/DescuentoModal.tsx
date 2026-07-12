@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Pedido } from "@/lib/domain/types";
 import { aCentavos, formatearDinero } from "@/lib/domain/types";
+import { useI18n } from "@/lib/shell/I18nProvider";
 
 interface Props {
   pedido: Pedido;
@@ -20,6 +21,7 @@ const PORCENTAJES_RAPIDOS = [10, 15, 20];
  * enviamos la intencion (tipo, valor, motivo) y refrescamos el pedido despues.
  */
 export default function DescuentoModal({ pedido, enviando, error, onConfirmar, onCancelar }: Props) {
+  const { t } = useI18n();
   const [tipo, setTipo] = useState<"porcentaje" | "monto">("porcentaje");
   const [porcentaje, setPorcentaje] = useState<number | null>(10);
   const [montoTexto, setMontoTexto] = useState("");
@@ -43,9 +45,9 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
-        <h2 className="mb-1 text-lg font-bold text-ck-dark">Aplicar descuento</h2>
+        <h2 className="mb-1 text-lg font-bold text-ck-dark">{t("pos.descuento.titulo")}</h2>
         <p className="mb-4 text-xs text-neutral-500">
-          Subtotal actual: {formatearDinero(pedido.subtotal)}
+          {t("pos.descuento.subtotalActual", { monto: formatearDinero(pedido.subtotal) })}
         </p>
 
         <div className="mb-3 flex gap-2">
@@ -56,7 +58,7 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
               tipo === "porcentaje" ? "bg-ck-red text-white" : "bg-neutral-100 text-ck-dark"
             }`}
           >
-            Porcentaje
+            {t("pos.descuento.porcentaje")}
           </button>
           <button
             type="button"
@@ -65,7 +67,7 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
               tipo === "monto" ? "bg-ck-red text-white" : "bg-neutral-100 text-ck-dark"
             }`}
           >
-            Monto fijo
+            {t("pos.descuento.montoFijo")}
           </button>
         </div>
 
@@ -89,7 +91,7 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
         ) : (
           <div className="mb-4">
             <label className="mb-1 block text-xs font-semibold text-neutral-600">
-              Monto del descuento (USD)
+              {t("pos.descuento.montoLabel")}
             </label>
             <input
               type="number"
@@ -105,13 +107,13 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
 
         <div className="mb-4">
           <label className="mb-1 block text-xs font-semibold text-neutral-600">
-            Motivo (requerido)
+            {t("pos.descuento.motivoLabel")}
           </label>
           <input
             type="text"
             value={motivo}
             onChange={(e) => setMotivo(e.target.value)}
-            placeholder="Ej: cliente frecuente, cortesia gerencia..."
+            placeholder={t("pos.descuento.motivoPlaceholder")}
             className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
             maxLength={140}
           />
@@ -125,7 +127,7 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
             onClick={onCancelar}
             className="flex-1 rounded-xl border border-neutral-300 py-3 text-sm font-semibold text-neutral-600"
           >
-            Cancelar
+            {t("pos.descuento.cancelar")}
           </button>
           <button
             type="button"
@@ -135,7 +137,7 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
               !formularioValido || enviando ? "cursor-not-allowed bg-neutral-300" : "bg-ck-red"
             }`}
           >
-            {enviando ? "Aplicando..." : "Aplicar"}
+            {enviando ? t("pos.descuento.aplicando") : t("pos.descuento.aplicar")}
           </button>
         </div>
       </div>

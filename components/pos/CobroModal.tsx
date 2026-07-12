@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import type { Pago, Pedido } from "@/lib/domain/types";
 import { aCentavos, formatearDinero } from "@/lib/domain/types";
-import { ErrorApi, registrarPago, type MetodoCobro, type PagoResponse } from "./api";
+import { useI18n } from "@/lib/shell/I18nProvider";
+import { textoErrorApi } from "@/lib/i18n/erroresApi";
+import { registrarPago, type MetodoCobro, type PagoResponse } from "./api";
 
 interface Props {
   pedido: Pedido;
@@ -16,14 +18,6 @@ interface Props {
 }
 
 const PORCENTAJES_PROPINA = [10, 15, 20];
-
-const ETIQUETA_ESTADO: Record<string, { texto: string; clase: string }> = {
-  aprobado: { texto: "Pago aprobado", clase: "bg-green-100 text-green-700" },
-  rechazado: { texto: "Pago rechazado", clase: "bg-red-100 text-ck-red" },
-  encolado: { texto: "Encolado (offline) — se confirmara al reconectar", clase: "bg-ck-gold/20 text-ck-gold" },
-  pendiente: { texto: "Pago pendiente", clase: "bg-neutral-200 text-neutral-700" },
-  reembolsado: { texto: "Reembolsado", clase: "bg-neutral-200 text-neutral-700" },
-};
 
 /**
  * Modal de cobro. Soporta efectivo, tarjeta (simulada, con offline / rechazo
@@ -40,6 +34,16 @@ export default function CobroModal({
   onCerrar,
   onPagoRegistrado,
 }: Props) {
+  const { t } = useI18n();
+
+  const ETIQUETA_ESTADO: Record<string, { texto: string; clase: string }> = {
+    aprobado: { texto: t("pos.cobro.estadoAprobado"), clase: "bg-green-100 text-green-700" },
+    rechazado: { texto: t("pos.cobro.estadoRechazado"), clase: "bg-red-100 text-ck-red" },
+    encolado: { texto: t("pos.cobro.estadoEncolado"), clase: "bg-ck-gold/20 text-ck-gold" },
+    pendiente: { texto: t("pos.cobro.estadoPendiente"), clase: "bg-neutral-200 text-neutral-700" },
+    reembolsado: { texto: t("pos.cobro.estadoReembolsado"), clase: "bg-neutral-200 text-neutral-700" },
+  };
+
   const [metodo, setMetodo] = useState<MetodoCobro>("efectivo");
   const [montoTexto, setMontoTexto] = useState((saldoPendiente / 100).toFixed(2));
   const [propinaTexto, setPropinaTexto] = useState("0.00");
@@ -94,7 +98,7 @@ export default function CobroModal({
       setUltimoResultado(resultado.pago);
       onPagoRegistrado(resultado);
     } catch (err) {
-      setErrorMsg(err instanceof ErrorApi ? err.message : "No se pudo registrar el pago.");
+      setErrorMsg(textoErrorApi(err, t, "pos.cobro.errorNoPudoRegistrarPago"));
     } finally {
       setEnviando(false);
     }
@@ -106,12 +110,14 @@ export default function CobroModal({
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center">
       <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
         <div className="mb-3 flex items-start justify-between">
-          <h2 className="text-lg font-bold text-ck-dark">Cobrar orden #{pedido.numeroOrden}</h2>
+          <h2 className="text-lg font-bold text-ck-dark">
+            {t("pos.cobro.titulo", { numero: pedido.numeroOrden })}
+          </h2>
           <button
             type="button"
             onClick={onCerrar}
             className="rounded-full p-2 text-2xl leading-none text-neutral-400 hover:bg-neutral-100"
-            aria-label="Cerrar"
+            aria-label={t("pos.cobro.cerrar")}
           >
             &times;
           </button>
@@ -119,15 +125,15 @@ export default function CobroModal({
 
         <div className="mb-4 rounded-xl bg-neutral-50 p-3 text-sm">
           <div className="flex justify-between text-neutral-600">
-            <span>Total de la orden</span>
+            <span>{t("pos.cobro.totalOrden")}</span>
             <span className="font-semibold">{formatearDinero(pedido.total)}</span>
           </div>
           <div className="flex justify-between text-neutral-600">
-            <span>Ya pagado</span>
+            <span>{t("pos.cobro.yaPagado")}</span>
             <span>{formatearDinero(pedido.total - saldoPendiente)}</span>
           </div>
           <div className="mt-1 flex justify-between border-t border-neutral-200 pt-1 text-base font-bold text-ck-red">
-            <span>Saldo pendiente</span>
+            <span>{t("pos.cobro.saldoPendiente")}</span>
             <span>{formatearDinero(saldoPendiente)}</span>
           </div>
         </div>
@@ -135,13 +141,14 @@ export default function CobroModal({
         {historialPagos.length > 0 && (
           <div className="mb-4">
             <p className="mb-1 text-xs font-semibold uppercase text-neutral-500">
-              Pagos registrados
+              {t("pos.cobro.pagosRegistrados")}
             </p>
             <ul className="space-y-1">
               {historialPagos.map((p) => (
                 <li key={p.id} className="flex justify-between text-xs text-neutral-600">
                   <span>
-                    {p.metodo === "efectivo" ? "Efectivo" : "Tarjeta"} · {p.estado}
+                    {p.metodo === "efectivo" ? t("pos.cobro.efectivo") : t("pos.cobro.tarjeta")} ·{" "}
+                    {ETIQUETA_ESTADO[p.estado]?.texto ?? p.estado}
                   </span>
                   <span>{formatearDinero(p.monto + p.propina)}</span>
                 </li>
@@ -158,14 +165,13 @@ export default function CobroModal({
 
         {sinConexion && (
           <div className="mb-4 rounded-xl bg-ck-gold/20 px-3 py-2 text-xs font-semibold text-ck-gold">
-            Sin conexion detectada: el pago con tarjeta se encolara (offline) para no
-            bloquear al cajero.
+            {t("pos.cobro.sinConexionAviso")}
           </div>
         )}
 
         {saldoPendiente <= 0 ? (
           <p className="rounded-xl bg-green-50 p-4 text-center text-sm font-semibold text-green-700">
-            Esta orden ya esta pagada por completo.
+            {t("pos.cobro.pagadaCompleto")}
           </p>
         ) : (
           <>
@@ -177,7 +183,7 @@ export default function CobroModal({
                   metodo === "efectivo" ? "bg-ck-red text-white" : "bg-neutral-100 text-ck-dark"
                 }`}
               >
-                Efectivo
+                {t("pos.cobro.efectivo")}
               </button>
               <button
                 type="button"
@@ -186,13 +192,13 @@ export default function CobroModal({
                   metodo === "tarjeta" ? "bg-ck-red text-white" : "bg-neutral-100 text-ck-dark"
                 }`}
               >
-                Tarjeta
+                {t("pos.cobro.tarjeta")}
               </button>
             </div>
 
             <div className="mb-3">
               <label className="mb-1 block text-xs font-semibold text-neutral-600">
-                Monto a cobrar ahora (USD)
+                {t("pos.cobro.montoACobrarLabel")}
               </label>
               <input
                 type="number"
@@ -204,14 +210,15 @@ export default function CobroModal({
               />
               {excedeSaldo && (
                 <p className="mt-1 text-xs font-semibold text-ck-red">
-                  No puede superar el saldo pendiente ({formatearDinero(saldoPendiente)}).
+                  {t("pos.cobro.excedeSaldo", { monto: formatearDinero(saldoPendiente) })}
                 </p>
               )}
             </div>
 
             <div className="mb-3">
               <label className="mb-1 block text-xs font-semibold text-neutral-600">
-                Propina {propinaYaAplicada && "(ya registrada en esta orden)"}
+                {t("pos.cobro.propinaLabel")}{" "}
+                {propinaYaAplicada && t("pos.cobro.propinaYaRegistrada")}
               </label>
               {!propinaYaAplicada && (
                 <div className="mb-2 flex gap-2">
@@ -230,7 +237,7 @@ export default function CobroModal({
                     onClick={() => setPropinaTexto("0.00")}
                     className="flex-1 rounded-lg border border-neutral-300 py-2 text-xs font-semibold text-neutral-500"
                   >
-                    Sin propina
+                    {t("pos.cobro.sinPropina")}
                   </button>
                 </div>
               )}
@@ -248,7 +255,7 @@ export default function CobroModal({
             {metodo === "efectivo" && (
               <div className="mb-3">
                 <label className="mb-1 block text-xs font-semibold text-neutral-600">
-                  Monto recibido del cliente (USD)
+                  {t("pos.cobro.montoRecibidoLabel")}
                 </label>
                 <input
                   type="number"
@@ -259,7 +266,7 @@ export default function CobroModal({
                   className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-base"
                 />
                 <div className="mt-1 flex justify-between text-sm">
-                  <span className="text-neutral-500">Cambio</span>
+                  <span className="text-neutral-500">{t("pos.cobro.cambio")}</span>
                   <span className={`font-bold ${cambio < 0 ? "text-ck-red" : "text-ck-dark"}`}>
                     {formatearDinero(Math.max(0, cambio))}
                   </span>
@@ -275,7 +282,7 @@ export default function CobroModal({
                     checked={offline}
                     onChange={(e) => setOffline(e.target.checked)}
                   />
-                  Modo offline (store-and-forward, demo)
+                  {t("pos.cobro.modoOffline")}
                 </label>
                 <label className="flex items-center gap-2 text-sm text-neutral-600">
                   <input
@@ -283,7 +290,7 @@ export default function CobroModal({
                     checked={forzarRechazo}
                     onChange={(e) => setForzarRechazo(e.target.checked)}
                   />
-                  Forzar rechazo (demo)
+                  {t("pos.cobro.forzarRechazo")}
                 </label>
               </div>
             )}
@@ -298,7 +305,9 @@ export default function CobroModal({
                 !formularioValido || enviando ? "cursor-not-allowed bg-neutral-300" : "bg-ck-red"
               }`}
             >
-              {enviando ? "Procesando..." : `Cobrar ${formatearDinero(monto + propina)}`}
+              {enviando
+                ? t("pos.cobro.procesando")
+                : t("pos.cobro.cobrarBoton", { monto: formatearDinero(monto + propina) })}
             </button>
           </>
         )}

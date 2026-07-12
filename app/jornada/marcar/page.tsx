@@ -20,6 +20,7 @@
 
 import { useEffect, useState } from "react";
 import { useI18n } from "@/lib/shell/I18nProvider";
+import { textoErrorApi } from "@/lib/i18n/erroresApi";
 import { useSesion } from "@/lib/shell/SesionProvider";
 import SelectorIdioma from "@/components/shell/SelectorIdioma";
 import ToggleTema from "@/components/shell/ToggleTema";
@@ -75,7 +76,7 @@ export default function MarcarJornadaPage() {
         setEmpleadoId(propio?.id ?? data[0]?.id ?? "");
       })
       .catch((err) => {
-        if (vivo) setErrorCarga(err instanceof ErrorApi ? err.message : t("jornada.marcar.errorGenerico"));
+        if (vivo) setErrorCarga(textoErrorApi(err, t, "jornada.marcar.errorGenerico"));
       })
       .finally(() => {
         if (vivo) setCargandoEmpleados(false);
@@ -131,7 +132,7 @@ export default function MarcarJornadaPage() {
       setIntentosFallidos((prev) => prev + 1);
       setBloqueadoHasta(resultado.bloqueadoHasta);
     } catch (err) {
-      setError(err instanceof ErrorApi ? err.message : t("jornada.marcar.errorGenerico"));
+      setError(textoErrorApi(err, t, "jornada.marcar.errorGenerico"));
     }
   }
 
@@ -145,7 +146,7 @@ export default function MarcarJornadaPage() {
       setPaso("confirmado");
     } catch (err) {
       if (err instanceof ErrorApi) {
-        setError(err.message);
+        setError(textoErrorApi(err, t, "jornada.marcar.errorGenerico"));
         if (err.codigo === "bloqueado_temporalmente") {
           try {
             const estado = await consultarBloqueo(empleadoId);
@@ -174,7 +175,7 @@ export default function MarcarJornadaPage() {
       setIntentosFallidos(0);
       setPaso("confirmado");
     } catch (err) {
-      setError(err instanceof ErrorApi ? err.message : t("jornada.marcar.errorGenerico"));
+      setError(textoErrorApi(err, t, "jornada.marcar.errorGenerico"));
     } finally {
       setEnviando(false);
     }

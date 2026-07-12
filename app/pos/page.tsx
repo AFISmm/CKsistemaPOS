@@ -2,9 +2,10 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
+import { useI18n } from "@/lib/shell/I18nProvider";
+import { textoErrorApi } from "@/lib/i18n/erroresApi";
 import type { Pago, Pedido, Producto } from "@/lib/domain/types";
 import {
-  ErrorApi,
   actualizarLinea,
   agregarLinea,
   aplicarDescuento,
@@ -28,6 +29,7 @@ import ReciboModal from "@/components/pos/ReciboModal";
 const USUARIO_DEMO_ID = "user-cajero-demo";
 
 export default function TerminalCajeroPage() {
+  const { t } = useI18n();
   const [catalogo, setCatalogo] = useState<CatalogoResponse | null>(null);
   const [pedido, setPedido] = useState<Pedido | null>(null);
   const [categoriaActivaId, setCategoriaActivaId] = useState<string | null>(null);
@@ -87,12 +89,15 @@ export default function TerminalCajeroPage() {
       setMostrarDescuento(false);
       setProductoEnModal(null);
     } catch (err) {
-      setErrorInicial(
-        err instanceof ErrorApi ? err.message : "No se pudo iniciar la terminal de cajero."
-      );
+      setErrorInicial(textoErrorApi(err, t, "pos.errorNoPudoIniciar"));
     } finally {
       setCargandoInicial(false);
     }
+    // "iniciar" se mantiene con identidad estable (deps []) a proposito: el
+    // useEffect de abajo lo dispara una sola vez al montar. Si dependiera de
+    // "t" (cambia de identidad al alternar idioma), cambiar el idioma
+    // reiniciaria el pedido en curso del cajero, algo inaceptable en un POS.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -105,12 +110,10 @@ export default function TerminalCajeroPage() {
       setPedido(actualizado);
       return actualizado;
     } catch (err) {
-      setErrorGlobal(
-        err instanceof ErrorApi ? err.message : "No se pudo actualizar el pedido."
-      );
+      setErrorGlobal(textoErrorApi(err, t, "pos.errorNoPudoActualizarPedido"));
       return null;
     }
-  }, []);
+  }, [t]);
 
   // ---------- Seleccion de producto / modificadores ----------
   function manejarSeleccionProducto(producto: Producto) {
@@ -131,9 +134,7 @@ export default function TerminalCajeroPage() {
       await agregarLinea(pedido.id, { productoId, cantidad: 1 });
       await refrescarPedido(pedido.id);
     } catch (err) {
-      setErrorGlobal(
-        err instanceof ErrorApi ? err.message : "No se pudo agregar el producto al ticket."
-      );
+      setErrorGlobal(textoErrorApi(err, t, "pos.errorNoPudoAgregarProducto"));
     } finally {
       setAgregandoLinea(false);
     }
@@ -157,9 +158,7 @@ export default function TerminalCajeroPage() {
       await refrescarPedido(pedido.id);
       setProductoEnModal(null);
     } catch (err) {
-      setErrorGlobal(
-        err instanceof ErrorApi ? err.message : "No se pudo agregar el producto al ticket."
-      );
+      setErrorGlobal(textoErrorApi(err, t, "pos.errorNoPudoAgregarProducto"));
     } finally {
       setAgregandoLinea(false);
     }
@@ -178,9 +177,7 @@ export default function TerminalCajeroPage() {
       }
       await refrescarPedido(pedido.id);
     } catch (err) {
-      setErrorGlobal(
-        err instanceof ErrorApi ? err.message : "No se pudo actualizar la linea del ticket."
-      );
+      setErrorGlobal(textoErrorApi(err, t, "pos.errorNoPudoActualizarLinea"));
     } finally {
       setActualizandoLineaId(null);
     }
@@ -194,9 +191,7 @@ export default function TerminalCajeroPage() {
       await actualizarLinea(pedido.id, lineaId, { eliminar: true });
       await refrescarPedido(pedido.id);
     } catch (err) {
-      setErrorGlobal(
-        err instanceof ErrorApi ? err.message : "No se pudo quitar la linea del ticket."
-      );
+      setErrorGlobal(textoErrorApi(err, t, "pos.errorNoPudoQuitarLinea"));
     } finally {
       setActualizandoLineaId(null);
     }
@@ -211,9 +206,7 @@ export default function TerminalCajeroPage() {
       await enviarACocina(pedido.id);
       await refrescarPedido(pedido.id);
     } catch (err) {
-      setErrorGlobal(
-        err instanceof ErrorApi ? err.message : "No se pudo enviar el pedido a cocina."
-      );
+      setErrorGlobal(textoErrorApi(err, t, "pos.errorNoPudoEnviarCocina"));
     } finally {
       setEnviandoACocina(false);
     }
@@ -233,9 +226,7 @@ export default function TerminalCajeroPage() {
       await refrescarPedido(pedido.id);
       setMostrarDescuento(false);
     } catch (err) {
-      setErrorDescuento(
-        err instanceof ErrorApi ? err.message : "No se pudo aplicar el descuento."
-      );
+      setErrorDescuento(textoErrorApi(err, t, "pos.errorNoPudoAplicarDescuento"));
     } finally {
       setAplicandoDescuento(false);
     }
@@ -273,7 +264,7 @@ export default function TerminalCajeroPage() {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-ck-cream">
         <Image src="/cropped-Logo.webp" alt="Chicken Kitchen" width={160} height={64} priority />
-        <p className="text-sm text-neutral-500">Preparando terminal de cajero...</p>
+        <p className="text-sm text-neutral-500">{t("pos.cargandoTerminal")}</p>
       </main>
     );
   }
@@ -283,14 +274,14 @@ export default function TerminalCajeroPage() {
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-ck-cream p-6 text-center">
         <Image src="/cropped-Logo.webp" alt="Chicken Kitchen" width={160} height={64} priority />
         <p className="max-w-md text-sm font-semibold text-ck-red">
-          {errorInicial ?? "No se pudo cargar la terminal de cajero."}
+          {errorInicial ?? t("pos.errorCargaTerminal")}
         </p>
         <button
           type="button"
           onClick={iniciar}
           className="rounded-xl bg-ck-red px-6 py-3 text-base font-bold text-white active:scale-95"
         >
-          Reintentar
+          {t("pos.reintentar")}
         </button>
       </main>
     );
@@ -309,7 +300,7 @@ export default function TerminalCajeroPage() {
         <div className="flex items-center gap-3">
           <Image src="/cropped-Logo.webp" alt="Chicken Kitchen" width={100} height={40} priority />
           <div>
-            <p className="text-sm font-bold text-ck-dark">Terminal de Cajero</p>
+            <p className="text-sm font-bold text-ck-dark">{t("pos.headerTitulo")}</p>
             <p className="text-xs text-neutral-500">
               Miami, FL &middot; 15738 SW 72nd Street
             </p>
@@ -318,7 +309,7 @@ export default function TerminalCajeroPage() {
         <div className="flex items-center gap-3">
           {sinConexion && (
             <span className="rounded-full bg-ck-gold/20 px-3 py-1 text-xs font-semibold text-ck-gold">
-              Sin conexion
+              {t("pos.sinConexion")}
             </span>
           )}
           <button
@@ -326,7 +317,7 @@ export default function TerminalCajeroPage() {
             onClick={manejarNuevoPedido}
             className="rounded-xl border border-ck-red px-4 py-2 text-sm font-bold text-ck-red active:scale-95"
           >
-            Nuevo pedido
+            {t("pos.nuevoPedido")}
           </button>
         </div>
       </header>
@@ -349,7 +340,7 @@ export default function TerminalCajeroPage() {
           />
           <div className="mt-4">
             {agregandoLinea && (
-              <p className="mb-2 text-xs font-semibold text-neutral-400">Agregando al ticket...</p>
+              <p className="mb-2 text-xs font-semibold text-neutral-400">{t("pos.agregandoAlTicket")}</p>
             )}
             <ProductosGrid
               productos={productosDeCategoria}

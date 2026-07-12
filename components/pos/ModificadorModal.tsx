@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { GrupoModificador, Modificador, Producto } from "@/lib/domain/types";
 import { formatearDinero } from "@/lib/domain/types";
+import { useI18n } from "@/lib/shell/I18nProvider";
 
 interface Props {
   producto: Producto;
@@ -27,6 +28,7 @@ export default function ModificadorModal({
   onConfirmar,
   onCancelar,
 }: Props) {
+  const { t } = useI18n();
   const gruposOrdenados = useMemo(
     () => [...grupos].sort((a, b) => (a.obligatorio === b.obligatorio ? 0 : a.obligatorio ? -1 : 1)),
     [grupos]
@@ -100,7 +102,7 @@ export default function ModificadorModal({
             type="button"
             onClick={onCancelar}
             className="rounded-full p-2 text-2xl leading-none text-neutral-400 hover:bg-neutral-100"
-            aria-label="Cerrar"
+            aria-label={t("pos.modificador.cerrar")}
           >
             &times;
           </button>
@@ -122,8 +124,11 @@ export default function ModificadorModal({
                     className={`text-xs font-medium ${invalido ? "text-ck-red" : "text-neutral-500"}`}
                   >
                     {grupo.minSelecciones === grupo.maxSelecciones
-                      ? `Elige ${grupo.minSelecciones}`
-                      : `Elige ${grupo.minSelecciones}-${grupo.maxSelecciones}`}
+                      ? t("pos.modificador.elige", { min: grupo.minSelecciones })
+                      : t("pos.modificador.eligeRango", {
+                          min: grupo.minSelecciones,
+                          max: grupo.maxSelecciones,
+                        })}
                     {" · "}
                     {cuenta}/{grupo.maxSelecciones}
                   </span>
@@ -163,14 +168,14 @@ export default function ModificadorModal({
 
           <div className="mb-4">
             <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-ck-dark">
-              Cantidad
+              {t("pos.modificador.cantidad")}
             </h3>
             <div className="flex items-center gap-3">
               <button
                 type="button"
                 onClick={() => setCantidad((c) => Math.max(1, c - 1))}
                 className="h-11 w-11 rounded-full bg-neutral-200 text-xl font-bold text-ck-dark active:scale-95"
-                aria-label="Restar cantidad"
+                aria-label={t("pos.modificador.restarCantidad")}
               >
                 -
               </button>
@@ -179,7 +184,7 @@ export default function ModificadorModal({
                 type="button"
                 onClick={() => setCantidad((c) => Math.min(20, c + 1))}
                 className="h-11 w-11 rounded-full bg-neutral-200 text-xl font-bold text-ck-dark active:scale-95"
-                aria-label="Sumar cantidad"
+                aria-label={t("pos.modificador.sumarCantidad")}
               >
                 +
               </button>
@@ -188,13 +193,13 @@ export default function ModificadorModal({
 
           <div>
             <label className="mb-1 block text-sm font-bold uppercase tracking-wide text-ck-dark">
-              Nota (opcional)
+              {t("pos.modificador.notaOpcional")}
             </label>
             <input
               type="text"
               value={notas}
               onChange={(e) => setNotas(e.target.value)}
-              placeholder="Ej: sin hielo, bien cocido..."
+              placeholder={t("pos.modificador.notaPlaceholder")}
               className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
               maxLength={140}
             />
@@ -203,7 +208,7 @@ export default function ModificadorModal({
 
         <div className="border-t border-neutral-200 p-4">
           <div className="mb-3 flex items-center justify-between text-sm text-neutral-500">
-            <span>Precio estimado</span>
+            <span>{t("pos.modificador.precioEstimado")}</span>
             <span className="font-semibold text-ck-dark">
               {formatearDinero(precioEstimadoUnitario * cantidad)}
             </span>
@@ -214,7 +219,7 @@ export default function ModificadorModal({
               onClick={onCancelar}
               className="flex-1 rounded-xl border border-neutral-300 py-3 text-base font-semibold text-neutral-600 active:scale-95"
             >
-              Cancelar
+              {t("pos.modificador.cancelar")}
             </button>
             <button
               type="button"
@@ -226,7 +231,7 @@ export default function ModificadorModal({
                   : "bg-ck-red hover:bg-red-700"
               }`}
             >
-              {enviando ? "Agregando..." : "Agregar al pedido"}
+              {enviando ? t("pos.modificador.agregando") : t("pos.modificador.agregarAlPedido")}
             </button>
           </div>
         </div>

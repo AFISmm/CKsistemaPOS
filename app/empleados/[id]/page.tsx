@@ -5,8 +5,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import type { Empleado, Marcaje, Rol, Ubicacion } from "@/lib/domain/types";
 import { formatearDinero } from "@/lib/domain/types";
+import { useI18n } from "@/lib/shell/I18nProvider";
+import { textoErrorApi } from "@/lib/i18n/erroresApi";
+import { nombreRolTraducido } from "@/lib/i18n/roles";
 import {
-  ErrorApi,
   listarMarcajes,
   listarRoles,
   listarUbicaciones,
@@ -15,6 +17,12 @@ import {
   type ResumenHorasResponse,
 } from "@/components/empleados/api";
 import MarcajeControles from "@/components/empleados/MarcajeControles";
+
+const CLAVE_ESTADO_EMPLEADO: Record<Empleado["estado"], string> = {
+  onboarding: "empleados.estado.onboarding",
+  activo: "empleados.estado.activo",
+  inactivo: "empleados.estado.inactivo",
+};
 
 function fechaISOHaceDias(dias: number): string {
   const d = new Date();
@@ -40,6 +48,7 @@ function formatearFechaHora(iso: string): string {
 
 /** /empleados/[id] — detalle: datos, marcajes recientes, marcar entrada/salida, resumen de horas. */
 export default function EmpleadoDetallePage() {
+  const { t } = useI18n();
   const params = useParams<{ id: string }>();
   const empleadoId = params.id;
 
@@ -71,11 +80,11 @@ export default function EmpleadoDetallePage() {
       setMarcajes(marcajesData);
       setResumen(resumenData);
     } catch (err) {
-      setError(err instanceof ErrorApi ? err.message : "No se pudo cargar el empleado.");
+      setError(textoErrorApi(err, t, "empleados.detalle.errorCargaEmpleado"));
     } finally {
       setCargando(false);
     }
-  }, [empleadoId, desdePeriodo, hastaPeriodo]);
+  }, [empleadoId, desdePeriodo, hastaPeriodo, t]);
 
   useEffect(() => {
     cargar();
@@ -84,7 +93,7 @@ export default function EmpleadoDetallePage() {
   if (cargando) {
     return (
       <main className="min-h-screen bg-ck-cream p-6">
-        <p className="text-sm text-neutral-500">Cargando...</p>
+        <p className="text-sm text-neutral-500">{t("empleados.detalle.cargando")}</p>
       </main>
     );
   }
@@ -93,16 +102,19 @@ export default function EmpleadoDetallePage() {
     return (
       <main className="min-h-screen bg-ck-cream p-6">
         <div className="rounded-lg bg-red-100 p-3 text-sm text-red-700">
-          {error ?? "Empleado no encontrado."}
+          {error ?? t("empleados.detalle.errorNoEncontrado")}
         </div>
         <Link href="/empleados" className="mt-4 inline-block text-sm text-ck-red underline">
-          Volver a Empleados
+          {t("empleados.detalle.volverAEmpleados")}
         </Link>
       </main>
     );
   }
 
-  const rol = roles.find((r) => r.id === empleado.rolId)?.nombre ?? empleado.rolId;
+  const rol = nombreRolTraducido(
+    roles.find((r) => r.id === empleado.rolId)?.nombre ?? empleado.rolId,
+    t
+  );
   const ubicacion = ubicaciones.find((u) => u.id === empleado.ubicacionId);
   const ultimoMarcaje = marcajes[marcajes.length - 1];
   const marcajesRecientes = [...marcajes].reverse().slice(0, 20);
@@ -112,10 +124,10 @@ export default function EmpleadoDetallePage() {
       <div className="mx-auto max-w-4xl">
         <div className="mb-6 flex items-center justify-between">
           <Link href="/empleados" className="text-sm text-ck-red underline">
-            &larr; Empleados
+            &larr; {t("empleados.detalle.volver")}
           </Link>
           <Link href="/nomina" className="text-sm text-ck-red underline">
-            Ir a Nomina
+            {t("empleados.detalle.irANomina")}
           </Link>
         </div>
 
@@ -128,30 +140,31 @@ export default function EmpleadoDetallePage() {
               </p>
             </div>
             <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-semibold text-neutral-600">
-              {empleado.estado}
+              {t(CLAVE_ESTADO_EMPLEADO[empleado.estado])}
             </span>
           </div>
           <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
             <div>
-              <dt className="text-xs uppercase text-neutral-400">Email</dt>
+              <dt className="text-xs uppercase text-neutral-400">{t("empleados.detalle.email")}</dt>
               <dd>{empleado.email}</dd>
             </div>
             <div>
-              <dt className="text-xs uppercase text-neutral-400">Telefono</dt>
+              <dt className="text-xs uppercase text-neutral-400">{t("empleados.detalle.telefono")}</dt>
               <dd>{empleado.telefono}</dd>
             </div>
             <div>
-              <dt className="text-xs uppercase text-neutral-400">Contratado</dt>
+              <dt className="text-xs uppercase text-neutral-400">{t("empleados.detalle.contratado")}</dt>
               <dd>{empleado.fechaContratacion}</dd>
             </div>
             <div>
-              <dt className="text-xs uppercase text-neutral-400">Tarifa/hora</dt>
+              <dt className="text-xs uppercase text-neutral-400">{t("empleados.detalle.tarifaHora")}</dt>
               <dd>{formatearDinero(empleado.tarifaHoraCentavos)}</dd>
             </div>
           </dl>
           {empleado.motivoBaja && (
             <p className="mt-3 text-xs text-neutral-500">
-              Motivo de baja: <span className="italic">{empleado.motivoBaja}</span>
+              {t("empleados.detalle.motivoBaja", { motivo: "" })}
+              <span className="italic">{empleado.motivoBaja}</span>
             </p>
           )}
         </div>
@@ -166,28 +179,31 @@ export default function EmpleadoDetallePage() {
               />
             ) : (
               <div className="rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-500">
-                Solo empleados <span className="font-semibold">activos</span> pueden marcar
-                asistencia. Este empleado esta en estado &quot;{empleado.estado}&quot;.
+                {t("empleados.detalle.soloActivosMarcan", {
+                  estado: t(CLAVE_ESTADO_EMPLEADO[empleado.estado]),
+                })}
               </div>
             )}
 
             <div className="mt-4 rounded-xl border border-neutral-200 bg-white p-4">
               <h3 className="mb-2 text-sm font-bold text-ck-dark">
-                Horas ultimos 7 dias ({desdePeriodo} a {hastaPeriodo})
+                {t("empleados.detalle.horasTitulo", { desde: desdePeriodo, hasta: hastaPeriodo })}
               </h3>
               <p className="text-2xl font-black text-ck-dark">
                 {formatearMinutos(resumen?.minutosTrabajados ?? 0)}
               </p>
               <p className="text-xs text-neutral-400">
-                Regular vs. extra (&gt;40h/semana) se calcula al correr nomina.
+                {t("empleados.detalle.horasNota")}
               </p>
             </div>
           </div>
 
           <div className="rounded-xl border border-neutral-200 bg-white p-4">
-            <h3 className="mb-2 text-sm font-bold text-ck-dark">Marcajes recientes</h3>
+            <h3 className="mb-2 text-sm font-bold text-ck-dark">
+              {t("empleados.detalle.marcajesRecientes")}
+            </h3>
             {marcajesRecientes.length === 0 ? (
-              <p className="text-sm text-neutral-400">Sin marcajes registrados.</p>
+              <p className="text-sm text-neutral-400">{t("empleados.detalle.sinMarcajes")}</p>
             ) : (
               <ul className="max-h-96 space-y-1 overflow-y-auto text-sm">
                 {marcajesRecientes.map((m) => (
@@ -201,23 +217,30 @@ export default function EmpleadoDetallePage() {
                           m.tipo === "entrada" ? "text-green-700" : "text-ck-red"
                         }`}
                       >
-                        {m.tipo}
+                        {m.tipo === "entrada"
+                          ? t("jornada.marcar.tipoEntrada")
+                          : t("jornada.marcar.tipoSalida")}
                       </span>
                       {formatearFechaHora(m.timestamp)}
                     </span>
                     <span className="flex gap-1">
-                      {m.tardanza && <Etiqueta texto="tarde" color="bg-ck-gold/20 text-ck-gold" />}
+                      {m.tardanza && (
+                        <Etiqueta texto={t("empleados.detalle.etiquetaTarde")} color="bg-ck-gold/20 text-ck-gold" />
+                      )}
                       {!m.dentroDeGeofence && (
-                        <Etiqueta texto="fuera de zona" color="bg-red-100 text-red-700" />
+                        <Etiqueta texto={t("empleados.detalle.etiquetaFueraZona")} color="bg-red-100 text-red-700" />
                       )}
                       {!m.identidadVerificada && (
-                        <Etiqueta texto="sin verificar" color="bg-red-100 text-red-700" />
+                        <Etiqueta texto={t("empleados.detalle.etiquetaSinVerificar")} color="bg-red-100 text-red-700" />
                       )}
                       {m.metodoVerificacion === "facial" && (
-                        <Etiqueta texto="facial+TOTP" color="bg-green-100 text-green-700" />
+                        <Etiqueta
+                          texto={t("empleados.detalle.etiquetaFacialTotp")}
+                          color="bg-green-100 text-green-700"
+                        />
                       )}
                       {m.metodoVerificacion === "pinRespaldo" && (
-                        <Etiqueta texto="PIN respaldo" color="bg-ck-gold/20 text-ck-gold" />
+                        <Etiqueta texto={t("empleados.detalle.etiquetaPinRespaldo")} color="bg-ck-gold/20 text-ck-gold" />
                       )}
                     </span>
                   </li>

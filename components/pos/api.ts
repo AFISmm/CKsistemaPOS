@@ -65,13 +65,21 @@ export interface PagoBody {
 
 const BASE_URL = "/api/v1";
 
-/** Error de API con mensaje amigable para mostrar en pantalla al cajero. */
+/**
+ * Error de API con mensaje amigable para mostrar en pantalla al cajero.
+ *
+ * `codigo` distingue los dos casos generados en el CLIENTE (sin conexion /
+ * respuesta sin cuerpo JSON util, ver lib/i18n/erroresApi.ts) de los codigos
+ * de dominio que ya vienen del backend (ej. "pedido_no_encontrado").
+ */
 export class ErrorApi extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  codigo?: string;
+  constructor(message: string, status: number, codigo?: string) {
     super(message);
     this.name = "ErrorApi";
     this.status = status;
+    this.codigo = codigo;
   }
 }
 
@@ -97,6 +105,14 @@ function extraerMensajeError(cuerpo: unknown, status: number): string {
   return `Ocurrio un error inesperado (codigo ${status}). Intenta de nuevo.`;
 }
 
+function extraerCodigoError(cuerpo: unknown): string | undefined {
+  if (cuerpo && typeof cuerpo === "object") {
+    const registro = cuerpo as Record<string, unknown>;
+    if (typeof registro.codigo === "string") return registro.codigo;
+  }
+  return undefined;
+}
+
 async function solicitar<T>(ruta: string, init?: RequestInit): Promise<T> {
   let respuesta: Response;
   try {
@@ -111,17 +127,37 @@ async function solicitar<T>(ruta: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new ErrorApi(
       "No hay conexion con el servidor. Revisa tu red e intenta de nuevo.",
-      0
+      0,
+      "SIN_CONEXION"
     );
   }
 
   const cuerpo = await leerCuerpoSeguro(respuesta);
 
   if (!respuesta.ok) {
-    throw new ErrorApi(extraerMensajeError(cuerpo, respuesta.status), respuesta.status);
+    throw new ErrorApi(
+      extraerMensajeError(cuerpo, respuesta.status),
+      respuesta.status,
+      extraerCodigoError(cuerpo) ?? "ERROR_INESPERADO_CLIENTE"
+    );
   }
 
   return cuerpo as T;
+}
+
+/**
+ * Todas las rutas de /api/v1/pedidos/** devuelven el Pedido envuelto como
+ * `{ pedido }` (igual que /api/v1/pagos devuelve `{ pago, pedido, ... }`,
+ * pero ESE ya se consume completo via PagoResponse). Este helper desenvuelve
+ * ese campo para las funciones que exponen `Promise<Pedido>` directamente.
+ * BUG CORREGIDO: antes se hacia `return cuerpo as T` tratando el objeto
+ * envuelto completo como si fuera el Pedido, lo que dejaba `pedido.lineas`
+ * (y el resto de sus campos) en `undefined` y tronaba Ticket.tsx con
+ * "Cannot read properties of undefined (reading 'length')".
+ */
+async function solicitarPedido(ruta: string, init?: RequestInit): Promise<Pedido> {
+  const { pedido } = await solicitar<{ pedido: Pedido }>(ruta, init);
+  return pedido;
 }
 
 export function obtenerCatalogo(): Promise<CatalogoResponse> {
@@ -132,18 +168,18 @@ export function crearPedido(input?: {
   nombreCliente?: string;
   canal?: string;
 }): Promise<Pedido> {
-  return solicitar<Pedido>("/pedidos", {
+  return solicitarPedido("/pedidos", {
     method: "POST",
     body: JSON.stringify(input ?? {}),
   });
 }
 
 export function obtenerPedido(pedidoId: string): Promise<Pedido> {
-  return solicitar<Pedido>(`/pedidos/${pedidoId}`);
+  return solicitarPedido(`/pedidos/${pedidoId}`);
 }
 
 export function agregarLinea(pedidoId: string, body: NuevaLineaBody): Promise<Pedido> {
-  return solicitar<Pedido>(`/pedidos/${pedidoId}/lineas`, {
+  return solicitarPedido(`/pedidos/${pedidoId}/lineas`, {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -154,20 +190,20 @@ export function actualizarLinea(
   lineaId: string,
   body: CambioLineaBody
 ): Promise<Pedido> {
-  return solicitar<Pedido>(`/pedidos/${pedidoId}/lineas/${lineaId}`, {
+  return solicitarPedido(`/pedidos/${pedidoId}/lineas/${lineaId}`, {
     method: "PATCH",
     body: JSON.stringify(body),
   });
 }
 
 export function enviarACocina(pedidoId: string): Promise<Pedido> {
-  return solicitar<Pedido>(`/pedidos/${pedidoId}/enviar-cocina`, {
+  return solicitarPedido(`/pedidos/${pedidoId}/enviar-cocina`, {
     method: "POST",
   });
 }
 
 export function aplicarDescuento(pedidoId: string, body: DescuentoBody): Promise<Pedido> {
-  return solicitar<Pedido>(`/pedidos/${pedidoId}/descuento`, {
+  return solicitarPedido(`/pedidos/${pedidoId}/descuento`, {
     method: "POST",
     body: JSON.stringify(body),
   });

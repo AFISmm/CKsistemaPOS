@@ -10,10 +10,12 @@ const BASE_URL = "/api/v1";
 
 export class ErrorApi extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  codigo?: string;
+  constructor(message: string, status: number, codigo?: string) {
     super(message);
     this.name = "ErrorApi";
     this.status = status;
+    this.codigo = codigo;
   }
 }
 
@@ -39,6 +41,14 @@ function extraerMensajeError(cuerpo: unknown, status: number): string {
   return `Ocurrio un error inesperado (codigo ${status}). Intenta de nuevo.`;
 }
 
+function extraerCodigoError(cuerpo: unknown): string | undefined {
+  if (cuerpo && typeof cuerpo === "object") {
+    const registro = cuerpo as Record<string, unknown>;
+    if (typeof registro.codigo === "string") return registro.codigo;
+  }
+  return undefined;
+}
+
 async function solicitar<T>(ruta: string, init?: RequestInit): Promise<T> {
   let respuesta: Response;
   try {
@@ -48,12 +58,20 @@ async function solicitar<T>(ruta: string, init?: RequestInit): Promise<T> {
       cache: "no-store",
     });
   } catch {
-    throw new ErrorApi("No hay conexion con el servidor. Revisa tu red e intenta de nuevo.", 0);
+    throw new ErrorApi(
+      "No hay conexion con el servidor. Revisa tu red e intenta de nuevo.",
+      0,
+      "SIN_CONEXION"
+    );
   }
 
   const cuerpo = await leerCuerpoSeguro(respuesta);
   if (!respuesta.ok) {
-    throw new ErrorApi(extraerMensajeError(cuerpo, respuesta.status), respuesta.status);
+    throw new ErrorApi(
+      extraerMensajeError(cuerpo, respuesta.status),
+      respuesta.status,
+      extraerCodigoError(cuerpo) ?? "ERROR_INESPERADO_CLIENTE"
+    );
   }
   return cuerpo as T;
 }

@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import { aCentavos, type Empleado, type Rol, type Ubicacion } from "@/lib/domain/types";
-import { crearEmpleado, ErrorApi, type NuevoEmpleadoBody } from "@/components/empleados/api";
+import { crearEmpleado, type NuevoEmpleadoBody } from "@/components/empleados/api";
+import { useI18n } from "@/lib/shell/I18nProvider";
+import { textoErrorApi } from "@/lib/i18n/erroresApi";
+import { nombreRolTraducido } from "@/lib/i18n/roles";
 
 /** Modal "Nuevo empleado" — alta en estado "onboarding" (rrhh-personal-pos). */
 export default function OnboardingModal({
@@ -16,6 +19,7 @@ export default function OnboardingModal({
   onCreado: (empleado: Empleado) => void;
   onCancelar: () => void;
 }) {
+  const { t } = useI18n();
   const [nombre, setNombre] = useState("");
   const [email, setEmail] = useState("");
   const [telefono, setTelefono] = useState("");
@@ -30,7 +34,7 @@ export default function OnboardingModal({
     setError(null);
     const tarifaHoraCentavos = aCentavos(Number(tarifaHora));
     if (!Number.isInteger(tarifaHoraCentavos) || tarifaHoraCentavos <= 0) {
-      setError("La tarifa por hora debe ser un numero positivo (ej. 15.00).");
+      setError(t("empleados.modal.errorTarifaInvalida"));
       return;
     }
     const body: NuevoEmpleadoBody = {
@@ -46,7 +50,7 @@ export default function OnboardingModal({
       const empleado = await crearEmpleado(body);
       onCreado(empleado);
     } catch (err) {
-      setError(err instanceof ErrorApi ? err.message : "No se pudo crear el empleado.");
+      setError(textoErrorApi(err, t, "empleados.modal.errorNoPudoCrear"));
     } finally {
       setEnviando(false);
     }
@@ -55,10 +59,9 @@ export default function OnboardingModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-        <h2 className="mb-1 text-lg font-bold text-ck-dark">Nuevo empleado</h2>
+        <h2 className="mb-1 text-lg font-bold text-ck-dark">{t("empleados.modal.nuevoTitulo")}</h2>
         <p className="mb-4 text-xs text-neutral-500">
-          Se crea en estado <span className="font-semibold">onboarding</span>. El acceso de
-          login (PIN) se genera al completar el onboarding.
+          {t("empleados.modal.nuevoDescripcion")}
         </p>
 
         {error && (
@@ -66,7 +69,7 @@ export default function OnboardingModal({
         )}
 
         <form onSubmit={manejarSubmit} className="space-y-3">
-          <Campo etiqueta="Nombre completo">
+          <Campo etiqueta={t("empleados.modal.campoNombre")}>
             <input
               required
               value={nombre}
@@ -75,7 +78,7 @@ export default function OnboardingModal({
               placeholder="Ana Rodriguez"
             />
           </Campo>
-          <Campo etiqueta="Email">
+          <Campo etiqueta={t("empleados.modal.campoEmail")}>
             <input
               required
               type="email"
@@ -85,7 +88,7 @@ export default function OnboardingModal({
               placeholder="ana@chickenkitchen.demo"
             />
           </Campo>
-          <Campo etiqueta="Telefono">
+          <Campo etiqueta={t("empleados.modal.campoTelefono")}>
             <input
               required
               value={telefono}
@@ -95,7 +98,7 @@ export default function OnboardingModal({
             />
           </Campo>
           <div className="grid grid-cols-2 gap-3">
-            <Campo etiqueta="Rol">
+            <Campo etiqueta={t("empleados.modal.campoRol")}>
               <select
                 value={rolId}
                 onChange={(e) => setRolId(e.target.value)}
@@ -103,12 +106,12 @@ export default function OnboardingModal({
               >
                 {roles.map((r) => (
                   <option key={r.id} value={r.id}>
-                    {r.nombre}
+                    {nombreRolTraducido(r.nombre, t)}
                   </option>
                 ))}
               </select>
             </Campo>
-            <Campo etiqueta="Tienda">
+            <Campo etiqueta={t("empleados.modal.campoTienda")}>
               <select
                 value={ubicacionId}
                 onChange={(e) => setUbicacionId(e.target.value)}
@@ -122,7 +125,7 @@ export default function OnboardingModal({
               </select>
             </Campo>
           </div>
-          <Campo etiqueta="Tarifa por hora (USD, DEMO)">
+          <Campo etiqueta={t("empleados.modal.campoTarifa")}>
             <input
               required
               type="number"
@@ -140,14 +143,14 @@ export default function OnboardingModal({
               onClick={onCancelar}
               className="rounded-xl border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-600"
             >
-              Cancelar
+              {t("empleados.modal.cancelar")}
             </button>
             <button
               type="submit"
               disabled={enviando}
               className="rounded-xl bg-ck-red px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
             >
-              {enviando ? "Creando..." : "Crear empleado"}
+              {enviando ? t("empleados.modal.creando") : t("empleados.modal.crearEmpleado")}
             </button>
           </div>
         </form>

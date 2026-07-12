@@ -5,7 +5,9 @@ import { useCallback, useEffect, useState } from "react";
 import type { Empleado, ReciboDePago } from "@/lib/domain/types";
 import { formatearDinero } from "@/lib/domain/types";
 import { listarEmpleados } from "@/components/empleados/api";
-import { ErrorApi, correrNomina, listarRecibos } from "@/components/nomina/api";
+import { correrNomina, listarRecibos } from "@/components/nomina/api";
+import { useI18n } from "@/lib/shell/I18nProvider";
+import { textoErrorApi } from "@/lib/i18n/erroresApi";
 
 function fechaISOHaceDias(dias: number): string {
   const d = new Date();
@@ -26,6 +28,7 @@ function formatearMinutos(min: number): string {
  * ficticias/simplificadas; ver README-DEMO.md y lib/nomina/calculo.ts.
  */
 export default function NominaPage() {
+  const { t } = useI18n();
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [recibos, setRecibos] = useState<ReciboDePago[]>([]);
   const [periodoInicio, setPeriodoInicio] = useState(fechaISOHaceDias(6));
@@ -43,11 +46,11 @@ export default function NominaPage() {
       setEmpleados(emps);
       setRecibos(recibosData);
     } catch (err) {
-      setError(err instanceof ErrorApi ? err.message : "No se pudo cargar la nomina.");
+      setError(textoErrorApi(err, t, "nomina.errorCarga"));
     } finally {
       setCargando(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     cargar();
@@ -68,7 +71,7 @@ export default function NominaPage() {
       });
       setRecibos((prev) => [...nuevos, ...prev]);
     } catch (err) {
-      setError(err instanceof ErrorApi ? err.message : "No se pudo correr la nomina.");
+      setError(textoErrorApi(err, t, "nomina.errorCorrer"));
     } finally {
       setCorriendo(false);
     }
@@ -79,24 +82,21 @@ export default function NominaPage() {
       <div className="mx-auto max-w-5xl">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-ck-dark">Nomina</h1>
-            <p className="text-sm text-neutral-600">Calculo de pago a partir de asistencia y propinas.</p>
+            <h1 className="text-2xl font-bold text-ck-dark">{t("nomina.titulo")}</h1>
+            <p className="text-sm text-neutral-600">{t("nomina.subtitulo")}</p>
           </div>
           <div className="flex items-center gap-3">
             <Link href="/" className="text-sm text-ck-red underline">
-              Inicio
+              {t("nomina.inicio")}
             </Link>
             <Link href="/empleados" className="text-sm text-ck-red underline">
-              Ir a Empleados
+              {t("nomina.irAEmpleados")}
             </Link>
           </div>
         </div>
 
         <div className="mb-4 rounded-xl border border-ck-gold/40 bg-ck-gold/10 p-3 text-xs text-ck-dark">
-          <strong>DEMO</strong> — tasas de retencion (10% federal generico) y la regla de horas
-          extra (&gt;40h/semana, FLSA simplificado) son ficticias. A validar con nomina/legal real
-          antes de produccion. FL y TX no tienen impuesto estatal sobre ingreso personal (correcto
-          en la vida real); solo se simula una retencion federal.
+          <strong>DEMO</strong> — {t("nomina.demoAviso")}
         </div>
 
         {error && (
@@ -105,7 +105,7 @@ export default function NominaPage() {
 
         <div className="mb-6 flex flex-wrap items-end gap-3 rounded-xl bg-white p-4 shadow-sm">
           <label className="text-xs font-semibold text-neutral-600">
-            Desde
+            {t("nomina.desde")}
             <input
               type="date"
               value={periodoInicio}
@@ -114,7 +114,7 @@ export default function NominaPage() {
             />
           </label>
           <label className="text-xs font-semibold text-neutral-600">
-            Hasta
+            {t("nomina.hasta")}
             <input
               type="date"
               value={periodoFin}
@@ -123,13 +123,13 @@ export default function NominaPage() {
             />
           </label>
           <label className="text-xs font-semibold text-neutral-600">
-            Empleado (opcional)
+            {t("nomina.empleadoOpcional")}
             <select
               value={empleadoId}
               onChange={(e) => setEmpleadoId(e.target.value)}
               className="mt-1 block rounded-lg border border-neutral-300 px-2 py-1 text-sm"
             >
-              <option value="">Todos los empleados activos</option>
+              <option value="">{t("nomina.todosActivos")}</option>
               {empleados
                 .filter((e) => e.estado !== "onboarding")
                 .map((e) => (
@@ -145,25 +145,25 @@ export default function NominaPage() {
             disabled={corriendo}
             className="rounded-xl bg-ck-red px-5 py-2 text-sm font-bold text-white disabled:opacity-50"
           >
-            {corriendo ? "Corriendo nomina..." : "Correr nomina"}
+            {corriendo ? t("nomina.corriendo") : t("nomina.correrNomina")}
           </button>
         </div>
 
         {cargando ? (
-          <p className="text-sm text-neutral-500">Cargando...</p>
+          <p className="text-sm text-neutral-500">{t("nomina.cargando")}</p>
         ) : (
           <div className="overflow-x-auto rounded-xl bg-white shadow-sm">
             <table className="w-full min-w-[900px] text-left text-sm">
               <thead className="bg-neutral-100 text-neutral-600">
                 <tr>
-                  <th className="p-3">Empleado</th>
-                  <th className="p-3">Periodo</th>
-                  <th className="p-3 text-right">Hrs regulares</th>
-                  <th className="p-3 text-right">Hrs extra</th>
-                  <th className="p-3 text-right">Propinas</th>
-                  <th className="p-3 text-right">Bruto</th>
-                  <th className="p-3 text-right">Retencion</th>
-                  <th className="p-3 text-right">Neto</th>
+                  <th className="p-3">{t("nomina.colEmpleado")}</th>
+                  <th className="p-3">{t("nomina.colPeriodo")}</th>
+                  <th className="p-3 text-right">{t("nomina.colHorasRegulares")}</th>
+                  <th className="p-3 text-right">{t("nomina.colHorasExtra")}</th>
+                  <th className="p-3 text-right">{t("nomina.colPropinas")}</th>
+                  <th className="p-3 text-right">{t("nomina.colBruto")}</th>
+                  <th className="p-3 text-right">{t("nomina.colRetencion")}</th>
+                  <th className="p-3 text-right">{t("nomina.colNeto")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -171,7 +171,7 @@ export default function NominaPage() {
                   <tr key={r.id} className="border-t border-neutral-100">
                     <td className="p-3 font-semibold">{nombreEmpleado(r.empleadoId)}</td>
                     <td className="p-3 text-xs text-neutral-500">
-                      {r.periodoInicio} a {r.periodoFin}
+                      {t("nomina.periodoSeparador", { inicio: r.periodoInicio, fin: r.periodoFin })}
                     </td>
                     <td className="p-3 text-right">{formatearMinutos(r.horasRegularesMin)}</td>
                     <td className="p-3 text-right">{formatearMinutos(r.horasExtraMin)}</td>
@@ -188,7 +188,7 @@ export default function NominaPage() {
                 {recibos.length === 0 && (
                   <tr>
                     <td colSpan={8} className="p-6 text-center text-neutral-400">
-                      Sin recibos generados todavia. Elige un periodo y corre la nomina.
+                      {t("nomina.sinRecibos")}
                     </td>
                   </tr>
                 )}

@@ -208,6 +208,11 @@ function sembrar(db: Db): void {
         "reportes.ver",
         "empleados.gestionar",
         "nomina.ver",
+        // El gerente de tienda tambien debe poder ver la pantalla de cocina
+        // (supervisa todo el local): sin este permiso, el sidebar del
+        // gerente no mostraba "Pantalla de Cocina" (unico permiso sembrado
+        // para /kds es "cocina.actualizarEstado", ver rol-cocina arriba).
+        "cocina.actualizarEstado",
       ],
     }
   );
