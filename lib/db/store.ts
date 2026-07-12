@@ -16,6 +16,7 @@ import type {
   Categoria,
   Combo,
   Empleado,
+  EstadoVerificacionFacial,
   EventoDeAuditoria,
   GrupoModificador,
   HorarioTurno,
@@ -24,6 +25,7 @@ import type {
   LineaModificador,
   Marcaje,
   Modificador,
+  Notificacion,
   Pago,
   Pedido,
   Producto,
@@ -63,6 +65,10 @@ export interface Db {
   horariosTurno: HorarioTurno[];
   marcajes: Marcaje[];
   recibosPago: ReciboDePago[];
+  // ---- Chequeo de inicio de jornada: TOTP + verificacion facial (owner: rrhh-personal-pos, etapa 2) ----
+  bloqueosVerificacionFacial: EstadoVerificacionFacial[];
+  // ---- Shell de UI (owner: etapa 1 de este proyecto) ----
+  notificaciones: Notificacion[];
   seeded: boolean;
 }
 
@@ -106,6 +112,8 @@ function crearDbVacia(): Db {
     horariosTurno: [],
     marcajes: [],
     recibosPago: [],
+    bloqueosVerificacionFacial: [],
+    notificaciones: [],
     seeded: false,
   };
 }
@@ -127,6 +135,9 @@ function sembrar(db: Db): void {
       direccion: "15738 SW 72nd Street, Miami, FL",
       moneda: "USD",
       activo: true,
+      // DEMO: secreto TOTP fijo (etapa 2, ver lib/jornada/totp.ts). Produccion:
+      // secreto aleatorio fuerte, aprovisionado/rotado de forma segura por tienda.
+      secretoTotp: "demo-totp-secret-mia-72nd-st-v1",
     },
     {
       id: "ubic-austin-tx",
@@ -137,6 +148,7 @@ function sembrar(db: Db): void {
       direccion: "Demo location, Austin, TX",
       moneda: "USD",
       activo: true,
+      secretoTotp: "demo-totp-secret-austin-v1",
     }
   );
 
@@ -187,6 +199,15 @@ function sembrar(db: Db): void {
         "inventario.ajustar",
         "turno.cierreZ",
         "producto.marcar86",
+        // ---- Permisos agregados por el shell de UI (etapa 1) ----
+        // No existia un permiso RBAC natural para "ver reportes", "gestionar
+        // personal" o "ver nomina" en el MVP de backend-ventas/rrhh-personal;
+        // se agregan aqui, otorgados SOLO a gerente de tienda, porque esas
+        // pantallas son informacion/operacion gerencial (ver decision
+        // documentada en lib/navigation/modulos.ts).
+        "reportes.ver",
+        "empleados.gestionar",
+        "nomina.ver",
       ],
     }
   );
@@ -240,6 +261,63 @@ function sembrar(db: Db): void {
   db.empleados.push(...rrhh.empleados);
   db.horariosTurno.push(...rrhh.horariosTurno);
   db.marcajes.push(...rrhh.marcajesIniciales);
+
+  // Notificaciones DEMO del shell de UI (panel de campana). Estaticas por
+  // ahora: produccion las emitiria cada modulo de dominio al ocurrir el
+  // evento real (producto86, alertaAsistencia, nominaGenerada, etc.).
+  const haceMinutos = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
+  db.notificaciones.push(
+    {
+      id: uid(),
+      ubicacionId: UBICACION_PILOTO_ID,
+      tipo: "inventario",
+      titulo: "Producto agotado: revisa inventario",
+      mensaje: "Un insumo cayo por debajo del umbral de stock bajo en Miami, FL.",
+      leida: false,
+      entidadRelacionadaHref: "/reportes",
+      creadaEn: haceMinutos(12),
+    },
+    {
+      id: uid(),
+      ubicacionId: UBICACION_PILOTO_ID,
+      tipo: "personal",
+      titulo: "Nuevo empleado en onboarding",
+      mensaje: "Hay un empleado recien dado de alta pendiente de completar su onboarding.",
+      leida: false,
+      entidadRelacionadaHref: "/empleados",
+      creadaEn: haceMinutos(45),
+    },
+    {
+      id: uid(),
+      ubicacionId: UBICACION_PILOTO_ID,
+      tipo: "nomina",
+      titulo: "Nomina lista para revision",
+      mensaje: "El calculo de nomina del periodo actual esta listo para que un gerente lo revise.",
+      leida: false,
+      entidadRelacionadaHref: "/nomina",
+      creadaEn: haceMinutos(90),
+    },
+    {
+      id: uid(),
+      ubicacionId: UBICACION_PILOTO_ID,
+      tipo: "pedido",
+      titulo: "Comandas activas en cocina",
+      mensaje: "Hay pedidos esperando en la pantalla de cocina (KDS).",
+      leida: true,
+      entidadRelacionadaHref: "/kds",
+      creadaEn: haceMinutos(150),
+    },
+    {
+      id: uid(),
+      ubicacionId: UBICACION_PILOTO_ID,
+      tipo: "sistema",
+      titulo: "Bienvenido al nuevo panel",
+      mensaje: "Ahora puedes cambiar de idioma y modo oscuro desde la barra superior.",
+      leida: false,
+      entidadRelacionadaHref: null,
+      creadaEn: haceMinutos(200),
+    }
+  );
 
   // Turno abierto en la tienda piloto (para poder vender desde el arranque)
   db.turnos.push({

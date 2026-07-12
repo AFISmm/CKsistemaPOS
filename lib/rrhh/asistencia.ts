@@ -16,7 +16,7 @@
  */
 
 import { ahora, getDb, registrarEvento, uid } from "../db/store";
-import type { Marcaje, TipoMarcaje } from "../domain/types";
+import type { Marcaje, MetodoVerificacionMarcaje, TipoMarcaje } from "../domain/types";
 import { obtenerEmpleado } from "./empleados";
 import { ErrorRrhh } from "./errores";
 
@@ -26,10 +26,27 @@ const TOLERANCIA_TARDANZA_MIN = 10;
 export interface RegistrarMarcajeInput {
   empleadoId: string;
   tipo: TipoMarcaje;
-  /** Simulacion DEMO: la app/kiosco "detecta" que el empleado esta fuera de la zona de la tienda. */
+  /**
+   * Simulacion DEMO (UI /empleados/[id]): la app/kiosco "detecta" que el
+   * empleado esta fuera de la zona de la tienda. Ignorado si se provee
+   * `dentroDeGeofence` explicito.
+   */
   simularFueraDeZona?: boolean;
-  /** Simulacion DEMO: la verificacion de identidad (ej. facial) "falla". */
+  /**
+   * Simulacion DEMO (UI /empleados/[id]): la verificacion de identidad (ej.
+   * facial) "falla". Ignorado si se provee `identidadVerificada` explicito.
+   */
   simularFalloIdentidad?: boolean;
+  /**
+   * AGREGADO EN ETAPA 2 (lib/jornada/marcaje.ts): override directo, usado
+   * cuando el llamador YA conoce el resultado real (codigo TOTP validado o
+   * PIN de respaldo validado) en vez de simularlo con un checkbox de UI.
+   * Tiene prioridad sobre `simularFueraDeZona`/`simularFalloIdentidad`.
+   */
+  dentroDeGeofence?: boolean;
+  identidadVerificada?: boolean;
+  /** AGREGADO EN ETAPA 2: metodo de verificacion de identidad para este marcaje (null si no aplica, ej. flujo manual /empleados). */
+  metodoVerificacion?: MetodoVerificacionMarcaje;
 }
 
 function horaDelDia(iso: string): { horas: number; minutos: number } {
@@ -90,8 +107,10 @@ export function registrarMarcaje(input: RegistrarMarcajeInput): Marcaje {
   }
 
   const timestamp = ahora();
-  const dentroDeGeofence = !input.simularFueraDeZona;
-  const identidadVerificada = !input.simularFalloIdentidad;
+  const dentroDeGeofence =
+    input.dentroDeGeofence !== undefined ? input.dentroDeGeofence : !input.simularFueraDeZona;
+  const identidadVerificada =
+    input.identidadVerificada !== undefined ? input.identidadVerificada : !input.simularFalloIdentidad;
   const tardanza = input.tipo === "entrada" ? calcularTardanza(input.empleadoId, timestamp) : false;
 
   const marcaje: Marcaje = {
@@ -103,6 +122,7 @@ export function registrarMarcaje(input: RegistrarMarcajeInput): Marcaje {
     dentroDeGeofence,
     identidadVerificada,
     tardanza,
+    metodoVerificacion: input.metodoVerificacion ?? null,
   };
 
   getDb().marcajes.push(marcaje);

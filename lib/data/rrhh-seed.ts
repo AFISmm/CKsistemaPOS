@@ -94,6 +94,8 @@ function generarMarcajesDia(
     dentroDeGeofence: true,
     identidadVerificada: true,
     tardanza: minutosTardanza > 10,
+    // Semilla historica anterior a la etapa 2 (TOTP + verificacion facial): sin metodo distinguido.
+    metodoVerificacion: null,
   };
   const salida: Marcaje = {
     id: nid("marcaje"),
@@ -104,6 +106,7 @@ function generarMarcajesDia(
     dentroDeGeofence: true,
     identidadVerificada: true,
     tardanza: false,
+    metodoVerificacion: null,
   };
   return [entrada, salida];
 }

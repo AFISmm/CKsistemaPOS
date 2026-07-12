@@ -105,11 +105,28 @@ export interface HorarioTurno {
 export type TipoMarcaje = "entrada" | "salida";
 
 /**
+ * AGREGADO EN ETAPA 2 (chequeo de inicio de jornada — ver lib/jornada/*):
+ * metodo por el que se verifico la identidad de ESE marcaje especifico.
+ *  - "facial": verificacion facial SIMULADA (exitosa) + codigo TOTP de la
+ *    pantalla central de la tienda (prueba de presencia fisica).
+ *  - "pinRespaldo": plan B tras agotar 3 intentos faciales fallidos; PIN de
+ *    respaldo contra Usuario.pinHash (no prueba presencia fisica).
+ */
+export type MetodoVerificacionMarcaje = "facial" | "pinRespaldo";
+
+/**
  * Evento de reloj checador (marcaje). Modelo inspirado en proveedores tipo
  * XmartClock (marcaje movil/desktop, geofencing, verificacion de identidad),
  * pero es 100% DEMO: `dentroDeGeofence` e `identidadVerificada` son flags
  * SIMULADOS desde la UI (checkboxes "simular fuera de zona" / "simular fallo
  * de verificacion"), no hay GPS ni reconocimiento facial real. Ver README-DEMO.md.
+ *
+ * Desde etapa 2, este mismo registro tambien es la salida del flujo de
+ * "chequeo de inicio de jornada" (TOTP + verificacion facial simulada desde
+ * el celular del empleado, ver lib/jornada/*): ese flujo llama a
+ * `registrarMarcaje` (lib/rrhh/asistencia.ts) con overrides explicitos de
+ * `dentroDeGeofence`/`identidadVerificada` (no los checkboxes de simulacion)
+ * y ademas puebla `metodoVerificacion`.
  */
 export interface Marcaje {
   id: string;
@@ -117,12 +134,29 @@ export interface Marcaje {
   ubicacionId: string;
   tipo: TipoMarcaje;
   timestamp: string; // ISO datetime
-  /** Simulado: true = dentro del geofence de la tienda. */
+  /** Simulado (o, desde etapa 2, "true" real cuando el codigo TOTP probo presencia): dentro del geofence de la tienda. */
   dentroDeGeofence: boolean;
-  /** Simulado: true = identidad verificada (ej. reconocimiento facial mock). */
+  /** Simulado (o, desde etapa 2, "true" real cuando paso verificacion facial simulada / PIN de respaldo): identidad verificada. */
   identidadVerificada: boolean;
   /** Calculado contra HorarioTurno del dia (si existe) al momento del marcaje "entrada". */
   tardanza: boolean;
+  /** AGREGADO EN ETAPA 2: metodo de verificacion. `null` = marcaje legado/semilla o del flujo manual /empleados/[id] (no distinguen metodo). */
+  metodoVerificacion: MetodoVerificacionMarcaje | null;
+}
+
+/**
+ * AGREGADO EN ETAPA 2 (chequeo de inicio de jornada): estado de intentos de
+ * verificacion facial por empleado. Vive en el store en memoria
+ * (Db.bloqueosVerificacionFacial, ver lib/db/store.ts) igual que el resto del
+ * estado DEMO. NO es un evento auditable (EventoDeAuditoria): es estado
+ * transitorio de seguridad para el bloqueo temporal de 5 minutos tras 3
+ * fallos consecutivos (ver lib/jornada/bloqueo.ts).
+ */
+export interface EstadoVerificacionFacial {
+  empleadoId: string;
+  intentosFallidosConsecutivos: number;
+  /** ISO datetime hasta el cual el metodo facial esta bloqueado para este empleado; null = no bloqueado. */
+  bloqueadoHasta: string | null;
 }
 
 /**
@@ -163,6 +197,16 @@ export interface Ubicacion {
   direccion: string;
   moneda: "USD";
   activo: boolean;
+  /**
+   * AGREGADO EN ETAPA 2 (chequeo de inicio de jornada): secreto TOTP (RFC 6238
+   * simplificado, ver lib/jornada/totp.ts) usado para generar/validar el
+   * codigo de 6 digitos que rota cada 10s en la pantalla central de la
+   * tienda (/jornada/pantalla). NUNCA se expone al celular del empleado ni se
+   * devuelve en ningun endpoint publico; solo se lee server-side. DEMO:
+   * valor fijo sembrado en lib/db/store.ts (produccion: secreto aleatorio
+   * fuerte por tienda, con aprovisionamiento/rotacion seguros).
+   */
+  secretoTotp: string;
 }
 
 export interface ReglaDeImpuesto {
@@ -365,6 +409,34 @@ export interface EventoDeAuditoria {
   motivo: string;
   payload: Record<string, unknown>;
   ocurridoEn: string;
+}
+
+// ---------- Notificaciones (owner: shell de UI, etapa 1) ----------
+
+export type TipoNotificacion =
+  | "inventario"
+  | "personal"
+  | "nomina"
+  | "pedido"
+  | "sistema";
+
+/**
+ * Notificacion mostrada en el panel de campana de la barra superior.
+ * DEMO: se siembran unas pocas notificaciones estaticas en lib/db/store.ts;
+ * no hay generacion automatica en tiempo real todavia (produccion las
+ * emitiria desde los modulos de dominio correspondientes al ocurrir el
+ * evento, ej. producto86, alertaAsistencia, nominaGenerada).
+ */
+export interface Notificacion {
+  id: string;
+  ubicacionId: string;
+  tipo: TipoNotificacion;
+  titulo: string;
+  mensaje: string;
+  leida: boolean;
+  /** Ruta interna a la que navegar al hacer click (null = sin destino). */
+  entidadRelacionadaHref: string | null;
+  creadaEn: string;
 }
 
 // ---------- Semilla de catalogo (owner: menu-inventario-pos) ----------

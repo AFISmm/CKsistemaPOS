@@ -16,6 +16,19 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/*
+ * Fallback de modo oscuro a nivel de <body> (clase "dark" en <html>, ver
+ * tailwind.config.ts darkMode:"class" y lib/shell/TemaProvider.tsx). Las
+ * paginas de negocio existentes (pos/kds/reportes/empleados/nomina) siguen
+ * pintando su propio fondo claro (bg-ck-cream) sobre esto; este fallback
+ * evita que se vea un fondo claro roto detras del shell nuevo (sidebar,
+ * topbar, panel de notificaciones, login), que si tienen clases dark:.
+ */
+.dark body {
+  background: #0a0a0a;
+  color: #f5f5f5;
+}
+
 /* Evitar seleccion accidental de texto en UI tactil */
 .pos-notouch {
   -webkit-user-select: none;

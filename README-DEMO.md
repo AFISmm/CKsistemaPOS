@@ -30,7 +30,8 @@ npm run dev     # http://localhost:3000
 ```
 
 Rutas: `/` (inicio) · `/pos` (cajero) · `/kds` (cocina) · `/reportes` (reportes) ·
-`/empleados` (personal) · `/nomina` (nomina).
+`/empleados` (personal) · `/nomina` (nomina) · `/jornada/pantalla` (pantalla central
+de la tienda) · `/jornada/marcar` (celular del empleado, chequeo de inicio de jornada).
 
 ## Modulo de Empleados y Nomina
 
@@ -101,6 +102,132 @@ proposito los `Usuario` demo ya sembrados (`user-cajero-demo`,
 | **Propinas -> empleado** | Se infiere via `Turno.usuarioAperturaId` (ver decision de modelado arriba). | Registrar el cajero/empleado directamente en `Pago` o `LineaDePedido`. |
 | **PIN / auth del empleado** | Mismo hash de demo que el resto del sistema (`demo:<pin>`). | bcrypt/argon2 (S-10, ya documentado). |
 
+## Chequeo de jornada (TOTP + verificacion facial) — etapa 2
+
+Segunda etapa de este proyecto (la primera construyo el shell: sesion demo por PIN,
+i18n, modo oscuro, sidebar, notificaciones). Reutiliza el `Marcaje` ya existente de
+`rrhh-personal-pos` (le agrega `metodoVerificacion: "facial" | "pinRespaldo" | null`)
+y su logica de registro (`lib/rrhh/asistencia.ts:registrarMarcaje`) — no crea una
+entidad de marcaje paralela.
+
+**Decision de negocio (ya tomada con el dueno de producto, ver prompt de la etapa)**:
+el empleado marca su jornada desde su CELULAR con (1) verificacion facial simulada,
+(2) un codigo TOTP de 6 digitos que se muestra en una PANTALLA CENTRAL FIJA de la
+tienda (no en el celular del empleado) — eso es lo que prueba presencia fisica en la
+tienda, a diferencia de mostrar el codigo en el mismo celular.
+
+- **Rutas**: `/jornada/pantalla` (pantalla central/kiosko de la tienda) y
+  `/jornada/marcar` (celular del empleado). Ambas estan EXENTAS del guard de sesion
+  del shell (`components/shell/AppShell.tsx`, `RUTAS_SIN_GUARD`): la pantalla es
+  compartida por toda la tienda (no hay un "usuario" al que pedirle PIN) y el celular
+  del empleado normalmente no tiene la sesion PIN de la tienda — la identidad/presencia
+  se prueban con el propio flujo facial+TOTP, no con el login del shell. Ninguna se
+  agrego al sidebar (`lib/navigation/modulos.ts`): no dependen de sesion/rol.
+- **Endpoints**: `GET /api/v1/jornada/codigo?ubicacionId=` (unico autorizado a revelar
+  el codigo vigente + segundos restantes), `POST /api/v1/jornada/intento-facial`
+  (reporta cada intento facial simulado; fuente de verdad del contador de fallos),
+  `GET /api/v1/jornada/bloqueo?empleadoId=`, `POST /api/v1/jornada/marcar` (facial +
+  codigo TOTP) y `POST /api/v1/jornada/marcar-respaldo` (PIN de respaldo).
+  Codigo: `lib/jornada/*`, `app/api/v1/jornada/**`.
+
+### Que es REAL (algoritmo genuino, no un mock)
+
+- **TOTP (RFC 6238 simplificado)** — `lib/jornada/totp.ts`: HMAC-SHA1 real sobre un
+  contador de tiempo (via `crypto.createHmac` de Node, RFC 4226/6238), truncamiento
+  dinamico a 6 digitos, periodo de **10 segundos** (requisito de negocio de esta
+  demo) y tolerancia de **1 ventana de desfase** (contador actual + el anterior) para
+  no ser estricto con la latencia de red. Simplificaciones documentadas frente al
+  estandar: el secreto (`Ubicacion.secretoTotp`) es un string UTF-8 usado directo
+  como clave HMAC (no Base32/RFC 4648, porque no hace falta interoperar con apps
+  autenticadoras externas: se genera y valida en el mismo servidor).
+- **Bloqueo por intentos** — `lib/jornada/bloqueo.ts`: 3 fallos faciales consecutivos
+  bloquean el metodo facial 5 minutos para ESE empleado (estado en memoria,
+  `Db.bloqueosVerificacionFacial`); el PIN de respaldo sigue disponible durante el
+  bloqueo. El servidor es la unica fuente de verdad (el conteo del celular es solo
+  UX); `POST /api/v1/jornada/marcar-respaldo` verifica que el empleado este
+  REALMENTE bloqueado antes de aceptar el PIN, para que no sea un atajo.
+
+### Que es MOCK / DEMO (reemplazar antes de produccion)
+
+| Area | Que es demo | Reemplazar por |
+|------|-------------|----------------|
+| **Verificacion facial** | Simulada por completo: dos botones "Simular exitosa/fallida" en `/jornada/marcar`, sin acceso a camara ni procesamiento biometrico real. | SDK de reconocimiento facial real (ver nota de cumplimiento abajo). |
+| **Secreto TOTP** | Fijo, sembrado en `lib/db/store.ts` (`Ubicacion.secretoTotp`), igual para toda la vida de la demo. | Secreto aleatorio fuerte por tienda, aprovisionado/rotado de forma segura (ej. al dar de alta la tablet de la tienda). |
+| **Prueba de presencia del PIN de respaldo** | El marcaje por PIN de respaldo (`metodoVerificacion="pinRespaldo"`) NO exige el codigo TOTP, por lo tanto se registra con `dentroDeGeofence=false`: es un gap de presencia fisica conocido y aceptado como trade-off del plan B. | Definir una prueba de presencia alternativa para el plan B (ej. geofencing GPS real) si se necesita mantener la garantia de presencia incluso en el flujo de respaldo. |
+
+> **NOTA DE CUMPLIMIENTO LEGAL (a resolver antes de produccion)**: el reconocimiento
+> facial real implica procesar datos biometricos, que en muchas jurisdicciones (ej.
+> BIPA en Illinois, GDPR en la UE, leyes de privacidad de FL/TX en evolucion) exige
+> consentimiento explicito, politica de retencion/borrado de datos biometricos y,
+> en algunos casos, evaluacion de impacto de privacidad. Por eso esta demo NUNCA
+> procesa biometria real: se simula exito/fallo. Antes de integrar un SDK real de
+> verificacion facial hay que resolver ese marco legal con el equipo de
+> cumplimiento/legal, igual que se documento para el PSP (ADR-0005) y el hardware.
+
+## Chatbot de ayuda — etapa 3
+
+Tercera y ultima etapa de este proyecto (la 1 construyo el shell, la 2 el
+chequeo de jornada TOTP + verificacion facial). Widget flotante de chat
+disponible en toda la app, con entrada/salida por texto o por voz.
+
+- **Montaje**: `components/shell/ChatbotWidget.tsx`, montado desde
+  `components/shell/AppShell.tsx` como hermano del contenedor
+  Sidebar+Topbar+`<main>` (justo antes del cierre del componente), NO dentro
+  de `<main>`. Por vivir en la rama de "sesion activa" de `AppShell`, queda
+  **excluido automaticamente** de `/login`, `/jornada/pantalla` (pantalla
+  kiosko de la tienda, sin distracciones a proposito) y `/jornada/marcar`
+  (flujo enfocado de un solo paso desde el celular del empleado) — esas tres
+  rutas retornan antes de llegar al punto de montaje del widget, asi que no
+  hace falta mantener una lista de exclusion aparte.
+- **Motor de respuestas**: `lib/chatbot/respuestas.ts`, funcion
+  `responder(mensajeUsuario, idioma)`. Es un motor de **REGLAS/PALABRAS
+  CLAVE** (matching de substrings normalizados sin acentos/mayusculas), NO un
+  LLM real. Cubre: reembolso, marcar producto agotado (86), abrir/cerrar
+  turno de caja, registrar jornada (entrada/salida), alta de empleado,
+  generar nomina, cambiar idioma, cambiar modo oscuro, y reportes (extra). Si
+  no reconoce la pregunta, responde con un mensaje generico sugiriendo otra
+  palabra clave o consultar el manual. El matching de palabras clave es
+  bilingue (ES/EN mezclado en cada intencion): el usuario puede escribir en
+  cualquiera de los dos idiomas, pero la respuesta siempre sale en el idioma
+  activo de la app (`useI18n().idioma`), como pide el requisito de negocio.
+- **Voz — 100% del navegador (`lib/chatbot/voz.ts`), SIN backend ni claves de
+  API de voz**:
+  - **Entrada (STT)**: `SpeechRecognition` / `webkitSpeechRecognition`
+    (soportado en Chrome/Edge). El boton de microfono transcribe en vivo
+    (resultados intermedios en el input) y, al confirmarse la transcripcion
+    final, la envia directo al motor de respuestas (no hace falta presionar
+    "Enviar" aparte). Si el navegador no soporta STT, el boton de microfono
+    simplemente no se muestra y aparece un aviso claro debajo del input
+    (`chatbot.sttNoSoportado`) — la app no se rompe.
+  - **Salida (TTS)**: `window.speechSynthesis` + `SpeechSynthesisUtterance`,
+    con `utterance.lang` seteado segun el idioma activo (`es-ES`/`en-US`). El
+    bot lee su respuesta en voz alta solo cuando el modo de respuesta activo
+    es "Audio" (toggle Texto/Audio en la cabecera del panel). Si el navegador
+    no soporta TTS, el toggle de modo "Audio" se deshabilita (con tooltip
+    explicando por que) y el chat sigue funcionando en modo texto.
+  - `SpeechRecognition` no esta en el `lib.dom.d.ts` estandar de TypeScript
+    (a diferencia de `SpeechSynthesisUtterance`, que si lo esta), por eso
+    `lib/chatbot/voz.ts` declara tipos minimos propios (`declare global`) en
+    vez de agregar una dependencia de tipos de terceros solo para esta demo.
+- **"Pensando"**: la demora antes de la respuesta es un `setTimeout` corto
+  (450-800ms) simulado en el cliente; no hay ninguna llamada de red detras.
+- **Sin backend propio**: toda la logica (reglas + voz) corre en el cliente;
+  no se creo ningun endpoint `/api/v1/chatbot` porque no hace falta estado
+  compartido entre pestañas/dispositivos para una demo de FAQ con motor de
+  reglas. Si en el futuro el "cerebro" pasa a ser un LLM real, ahi si haria
+  falta un endpoint de servidor (para no exponer la API key del proveedor en
+  el cliente).
+
+### Que es REAL vs. MOCK en el chatbot
+
+| Area | Que es real | Que es mock/DEMO | Reemplazar por |
+|------|-------------|-------------------|-----------------|
+| Entrada de voz (STT) | SI — Web Speech API real del navegador (`SpeechRecognition`), corre 100% local | — | Nada que reemplazar; seguiria siendo client-side. Opcionalmente evaluar un STT de servidor si se necesita soporte en navegadores que no implementan la API (ej. Firefox). |
+| Salida de voz (TTS) | SI — Web Speech API real del navegador (`speechSynthesis`) | — | Igual que STT: seguiria siendo client-side; opcionalmente voces mas naturales via un servicio de TTS si la calidad de la voz del sistema operativo no es suficiente. |
+| "Cerebro" de las respuestas | NO | Motor de reglas/palabras clave (`lib/chatbot/respuestas.ts`), catalogo fijo de intenciones, sin comprension de lenguaje natural real | Llamada real a un LLM (ej. **Claude via Anthropic API**) con contexto del sistema POS (manual, permisos del usuario, historial de conversacion), servida desde un endpoint de backend para no exponer la API key en el cliente. |
+| Demora de "pensando" | NO | `setTimeout` fijo simulado, sin llamada de red | Latencia real de la llamada al LLM. |
+| Escalamiento a humano | NO (fuera de alcance de esta demo) | — | Flujo de handoff a un agente humano si el motor de reglas/LLM no puede resolver la consulta. |
+
 ## Mocks y datos DEMO — REEMPLAZAR ANTES DE PRODUCCION
 
 | Area | Que es demo | Reemplazar por |
@@ -123,6 +250,8 @@ proposito los `Usuario` demo ya sembrados (`user-cajero-demo`,
   /reportes               UI reportes            [reportes-analitica-pos, fase 3]
   /empleados              UI personal/asistencia [rrhh-personal-pos]
   /nomina                 UI nomina              [nomina-pos]
+  /jornada/pantalla       UI pantalla central    [rrhh-personal-pos, etapa 2]
+  /jornada/marcar         UI celular empleado    [rrhh-personal-pos, etapa 2]
   /api/v1/...             route handlers REST    (ver dueno por recurso)
 /lib
   /domain/types.ts        contrato de tipos      [orquestador]  (no editar firmas)
@@ -135,7 +264,10 @@ proposito los `Usuario` demo ya sembrados (`user-cajero-demo`,
   /kitchen/*              estado de cocina       [kds-cocina-pos]
   /rrhh/*                 empleados + asistencia [rrhh-personal-pos]
   /nomina/*               calculo de nomina      [nomina-pos]
+  /jornada/*              TOTP + bloqueo facial  [rrhh-personal-pos, etapa 2]
+  /chatbot/*              reglas + voz del chat  [shell de UI, etapa 3]
   /hardware/*             stubs de perifericos   [hardware-perifericos-pos, fase 3]
+/components/shell/ChatbotWidget.tsx  widget flotante de chat [shell de UI, etapa 3]
 /public/cropped-Logo.webp logo real de marca
 ```
 

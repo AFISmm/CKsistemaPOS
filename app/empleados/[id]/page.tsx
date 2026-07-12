@@ -213,6 +213,12 @@ export default function EmpleadoDetallePage() {
                       {!m.identidadVerificada && (
                         <Etiqueta texto="sin verificar" color="bg-red-100 text-red-700" />
                       )}
+                      {m.metodoVerificacion === "facial" && (
+                        <Etiqueta texto="facial+TOTP" color="bg-green-100 text-green-700" />
+                      )}
+                      {m.metodoVerificacion === "pinRespaldo" && (
+                        <Etiqueta texto="PIN respaldo" color="bg-ck-gold/20 text-ck-gold" />
+                      )}
                     </span>
                   </li>
                 ))}
