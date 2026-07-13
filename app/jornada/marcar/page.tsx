@@ -439,7 +439,7 @@ export default function MarcarJornadaPage() {
                   hora: new Date(marcaje.timestamp).toLocaleTimeString(),
                 })}
               </p>
-              <p className="text-xs text-neutral-400">
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">
                 {marcaje.metodoVerificacion === "pinRespaldo"
                   ? t("jornada.marcar.metodoPinRespaldo")
                   : t("jornada.marcar.metodoFacial")}

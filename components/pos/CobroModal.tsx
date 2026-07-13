@@ -37,11 +37,11 @@ export default function CobroModal({
   const { t } = useI18n();
 
   const ETIQUETA_ESTADO: Record<string, { texto: string; clase: string }> = {
-    aprobado: { texto: t("pos.cobro.estadoAprobado"), clase: "bg-green-100 text-green-700" },
-    rechazado: { texto: t("pos.cobro.estadoRechazado"), clase: "bg-red-100 text-ck-red" },
+    aprobado: { texto: t("pos.cobro.estadoAprobado"), clase: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300" },
+    rechazado: { texto: t("pos.cobro.estadoRechazado"), clase: "bg-red-100 text-ck-red dark:bg-red-950/40 dark:text-red-300" },
     encolado: { texto: t("pos.cobro.estadoEncolado"), clase: "bg-ck-gold/20 text-ck-gold" },
-    pendiente: { texto: t("pos.cobro.estadoPendiente"), clase: "bg-neutral-200 text-neutral-700" },
-    reembolsado: { texto: t("pos.cobro.estadoReembolsado"), clase: "bg-neutral-200 text-neutral-700" },
+    pendiente: { texto: t("pos.cobro.estadoPendiente"), clase: "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200" },
+    reembolsado: { texto: t("pos.cobro.estadoReembolsado"), clase: "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200" },
   };
 
   const [metodo, setMetodo] = useState<MetodoCobro>("efectivo");
@@ -108,31 +108,31 @@ export default function CobroModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center">
-      <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
+      <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl dark:bg-neutral-900 sm:rounded-2xl">
         <div className="mb-3 flex items-start justify-between">
-          <h2 className="text-lg font-bold text-ck-dark">
+          <h2 className="text-lg font-bold text-ck-dark dark:text-neutral-100">
             {t("pos.cobro.titulo", { numero: pedido.numeroOrden })}
           </h2>
           <button
             type="button"
             onClick={onCerrar}
-            className="rounded-full p-2 text-2xl leading-none text-neutral-400 hover:bg-neutral-100"
+            className="rounded-full p-2 text-2xl leading-none text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
             aria-label={t("pos.cobro.cerrar")}
           >
             &times;
           </button>
         </div>
 
-        <div className="mb-4 rounded-xl bg-neutral-50 p-3 text-sm">
-          <div className="flex justify-between text-neutral-600">
+        <div className="mb-4 rounded-xl bg-neutral-50 p-3 text-sm dark:bg-neutral-800">
+          <div className="flex justify-between text-neutral-600 dark:text-neutral-300">
             <span>{t("pos.cobro.totalOrden")}</span>
             <span className="font-semibold">{formatearDinero(pedido.total)}</span>
           </div>
-          <div className="flex justify-between text-neutral-600">
+          <div className="flex justify-between text-neutral-600 dark:text-neutral-300">
             <span>{t("pos.cobro.yaPagado")}</span>
             <span>{formatearDinero(pedido.total - saldoPendiente)}</span>
           </div>
-          <div className="mt-1 flex justify-between border-t border-neutral-200 pt-1 text-base font-bold text-ck-red">
+          <div className="mt-1 flex justify-between border-t border-neutral-200 pt-1 text-base font-bold text-ck-red dark:border-neutral-700">
             <span>{t("pos.cobro.saldoPendiente")}</span>
             <span>{formatearDinero(saldoPendiente)}</span>
           </div>
@@ -140,12 +140,12 @@ export default function CobroModal({
 
         {historialPagos.length > 0 && (
           <div className="mb-4">
-            <p className="mb-1 text-xs font-semibold uppercase text-neutral-500">
+            <p className="mb-1 text-xs font-semibold uppercase text-neutral-600 dark:text-neutral-400">
               {t("pos.cobro.pagosRegistrados")}
             </p>
             <ul className="space-y-1">
               {historialPagos.map((p) => (
-                <li key={p.id} className="flex justify-between text-xs text-neutral-600">
+                <li key={p.id} className="flex justify-between text-xs text-neutral-600 dark:text-neutral-300">
                   <span>
                     {p.metodo === "efectivo" ? t("pos.cobro.efectivo") : t("pos.cobro.tarjeta")} ·{" "}
                     {ETIQUETA_ESTADO[p.estado]?.texto ?? p.estado}
@@ -170,7 +170,7 @@ export default function CobroModal({
         )}
 
         {saldoPendiente <= 0 ? (
-          <p className="rounded-xl bg-green-50 p-4 text-center text-sm font-semibold text-green-700">
+          <p className="rounded-xl bg-green-50 p-4 text-center text-sm font-semibold text-green-700 dark:bg-green-900/30 dark:text-green-300">
             {t("pos.cobro.pagadaCompleto")}
           </p>
         ) : (
@@ -180,7 +180,7 @@ export default function CobroModal({
                 type="button"
                 onClick={() => setMetodo("efectivo")}
                 className={`flex-1 rounded-xl py-3 text-sm font-bold ${
-                  metodo === "efectivo" ? "bg-ck-red text-white" : "bg-neutral-100 text-ck-dark"
+                  metodo === "efectivo" ? "bg-ck-red text-white" : "bg-neutral-100 text-ck-dark dark:bg-neutral-800 dark:text-neutral-100"
                 }`}
               >
                 {t("pos.cobro.efectivo")}
@@ -189,7 +189,7 @@ export default function CobroModal({
                 type="button"
                 onClick={() => setMetodo("tarjeta")}
                 className={`flex-1 rounded-xl py-3 text-sm font-bold ${
-                  metodo === "tarjeta" ? "bg-ck-red text-white" : "bg-neutral-100 text-ck-dark"
+                  metodo === "tarjeta" ? "bg-ck-red text-white" : "bg-neutral-100 text-ck-dark dark:bg-neutral-800 dark:text-neutral-100"
                 }`}
               >
                 {t("pos.cobro.tarjeta")}
@@ -197,7 +197,7 @@ export default function CobroModal({
             </div>
 
             <div className="mb-3">
-              <label className="mb-1 block text-xs font-semibold text-neutral-600">
+              <label className="mb-1 block text-xs font-semibold text-neutral-600 dark:text-neutral-400">
                 {t("pos.cobro.montoACobrarLabel")}
               </label>
               <input
@@ -206,17 +206,17 @@ export default function CobroModal({
                 step="0.01"
                 value={montoTexto}
                 onChange={(e) => setMontoTexto(e.target.value)}
-                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-base"
+                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-base text-ck-dark dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
               />
               {excedeSaldo && (
-                <p className="mt-1 text-xs font-semibold text-ck-red">
+                <p className="mt-1 text-xs font-semibold text-ck-red dark:text-red-400">
                   {t("pos.cobro.excedeSaldo", { monto: formatearDinero(saldoPendiente) })}
                 </p>
               )}
             </div>
 
             <div className="mb-3">
-              <label className="mb-1 block text-xs font-semibold text-neutral-600">
+              <label className="mb-1 block text-xs font-semibold text-neutral-600 dark:text-neutral-400">
                 {t("pos.cobro.propinaLabel")}{" "}
                 {propinaYaAplicada && t("pos.cobro.propinaYaRegistrada")}
               </label>
@@ -227,7 +227,7 @@ export default function CobroModal({
                       key={pct}
                       type="button"
                       onClick={() => calcularPropinaPorcentaje(pct)}
-                      className="flex-1 rounded-lg border border-neutral-300 py-2 text-xs font-semibold text-ck-dark hover:border-ck-red"
+                      className="flex-1 rounded-lg border border-neutral-300 py-2 text-xs font-semibold text-ck-dark hover:border-ck-red dark:border-neutral-600 dark:text-neutral-100"
                     >
                       {pct}%
                     </button>
@@ -235,7 +235,7 @@ export default function CobroModal({
                   <button
                     type="button"
                     onClick={() => setPropinaTexto("0.00")}
-                    className="flex-1 rounded-lg border border-neutral-300 py-2 text-xs font-semibold text-neutral-500"
+                    className="flex-1 rounded-lg border border-neutral-300 py-2 text-xs font-semibold text-neutral-600 dark:border-neutral-600 dark:text-neutral-400"
                   >
                     {t("pos.cobro.sinPropina")}
                   </button>
@@ -248,13 +248,13 @@ export default function CobroModal({
                 disabled={propinaYaAplicada}
                 value={propinaTexto}
                 onChange={(e) => setPropinaTexto(e.target.value)}
-                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-base disabled:bg-neutral-100"
+                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-base text-ck-dark disabled:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:disabled:bg-neutral-800/50"
               />
             </div>
 
             {metodo === "efectivo" && (
               <div className="mb-3">
-                <label className="mb-1 block text-xs font-semibold text-neutral-600">
+                <label className="mb-1 block text-xs font-semibold text-neutral-600 dark:text-neutral-400">
                   {t("pos.cobro.montoRecibidoLabel")}
                 </label>
                 <input
@@ -263,11 +263,11 @@ export default function CobroModal({
                   step="0.01"
                   value={montoRecibidoTexto}
                   onChange={(e) => setMontoRecibidoTexto(e.target.value)}
-                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-base"
+                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-base text-ck-dark dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
                 />
                 <div className="mt-1 flex justify-between text-sm">
-                  <span className="text-neutral-500">{t("pos.cobro.cambio")}</span>
-                  <span className={`font-bold ${cambio < 0 ? "text-ck-red" : "text-ck-dark"}`}>
+                  <span className="text-neutral-600 dark:text-neutral-400">{t("pos.cobro.cambio")}</span>
+                  <span className={`font-bold ${cambio < 0 ? "text-ck-red dark:text-red-400" : "text-ck-dark dark:text-neutral-100"}`}>
                     {formatearDinero(Math.max(0, cambio))}
                   </span>
                 </div>
@@ -275,8 +275,8 @@ export default function CobroModal({
             )}
 
             {metodo === "tarjeta" && (
-              <div className="mb-3 space-y-2 rounded-xl bg-neutral-50 p-3">
-                <label className="flex items-center gap-2 text-sm text-neutral-600">
+              <div className="mb-3 space-y-2 rounded-xl bg-neutral-50 p-3 dark:bg-neutral-800">
+                <label className="flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-300">
                   <input
                     type="checkbox"
                     checked={offline}
@@ -284,7 +284,7 @@ export default function CobroModal({
                   />
                   {t("pos.cobro.modoOffline")}
                 </label>
-                <label className="flex items-center gap-2 text-sm text-neutral-600">
+                <label className="flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-300">
                   <input
                     type="checkbox"
                     checked={forzarRechazo}
@@ -295,14 +295,14 @@ export default function CobroModal({
               </div>
             )}
 
-            {errorMsg && <p className="mb-3 text-sm font-semibold text-ck-red">{errorMsg}</p>}
+            {errorMsg && <p className="mb-3 text-sm font-semibold text-ck-red dark:text-red-400">{errorMsg}</p>}
 
             <button
               type="button"
               disabled={!formularioValido || enviando}
               onClick={confirmarPago}
               className={`w-full rounded-xl py-4 text-lg font-bold text-white active:scale-95 ${
-                !formularioValido || enviando ? "cursor-not-allowed bg-neutral-300" : "bg-ck-red"
+                !formularioValido || enviando ? "cursor-not-allowed bg-neutral-300 dark:bg-neutral-700" : "bg-ck-red"
               }`}
             >
               {enviando

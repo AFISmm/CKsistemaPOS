@@ -60,14 +60,14 @@ export default function MarcajeControles({
   }
 
   return (
-    <div className="rounded-xl border border-neutral-200 bg-white p-4">
-      <h3 className="mb-2 text-sm font-bold text-ck-dark">{t("empleados.reloj.titulo")}</h3>
-      <p className="mb-3 text-xs text-neutral-500">
+    <div className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-700 dark:bg-neutral-900">
+      <h3 className="mb-2 text-sm font-bold text-ck-dark dark:text-neutral-100">{t("empleados.reloj.titulo")}</h3>
+      <p className="mb-3 text-xs text-neutral-600 dark:text-neutral-400">
         {t("empleados.reloj.descripcion")}
       </p>
 
       <div className="mb-3 space-y-1">
-        <label className="flex items-center gap-2 text-xs text-neutral-600">
+        <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-300">
           <input
             type="checkbox"
             checked={simularFueraDeZona}
@@ -75,7 +75,7 @@ export default function MarcajeControles({
           />
           {t("empleados.reloj.simularFueraZona")}
         </label>
-        <label className="flex items-center gap-2 text-xs text-neutral-600">
+        <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-300">
           <input
             type="checkbox"
             checked={simularFalloIdentidad}
@@ -85,7 +85,7 @@ export default function MarcajeControles({
         </label>
       </div>
 
-      {error && <div className="mb-2 rounded-lg bg-red-50 p-2 text-xs text-ck-red">{error}</div>}
+      {error && <div className="mb-2 rounded-lg bg-red-50 p-2 text-xs text-ck-red dark:bg-red-950/40 dark:text-red-300">{error}</div>}
       {alerta && (
         <div className="mb-2 rounded-lg bg-ck-gold/20 p-2 text-xs font-semibold text-ck-gold">
           {alerta}

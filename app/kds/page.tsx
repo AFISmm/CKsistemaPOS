@@ -23,6 +23,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Pedido } from "@/lib/domain/types";
 import { useI18n } from "@/lib/shell/I18nProvider";
 import OrderCard from "@/components/kds/OrderCard";
+import FondoFoto from "@/components/shell/FondoFoto";
 import {
   GRACIA_LISTO_MS,
   POLLING_MS,
@@ -204,30 +205,32 @@ export default function KdsPage() {
   });
 
   return (
-    <main className="pos-notouch min-h-screen bg-neutral-950 p-4 text-neutral-100">
-      <header className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-neutral-800 pb-3">
+    <main className="pos-notouch relative min-h-screen overflow-hidden bg-neutral-100 p-4 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
+      <FondoFoto />
+      <div className="relative z-10">
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-neutral-300 pb-3 dark:border-neutral-800">
         <div>
-          <h1 className="text-3xl font-black tracking-tight text-white">
+          <h1 className="text-3xl font-black tracking-tight text-neutral-900 dark:text-white">
             {t("kds.titulo")} <span className="text-ck-red">—</span> Chicken Kitchen
           </h1>
-          <p className="text-sm text-neutral-400">
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">
             {t("kds.sync", { seg: (POLLING_MS / 1000).toFixed(1) })}
           </p>
         </div>
         <div className="flex items-center gap-6">
           <div className="text-right">
-            <div className="text-xs uppercase tracking-wide text-neutral-500">
+            <div className="text-xs uppercase tracking-wide text-neutral-600 dark:text-neutral-500">
               {t("kds.comandasActivas")}
             </div>
-            <div className="text-3xl font-black text-white">
+            <div className="text-3xl font-black text-neutral-900 dark:text-white">
               {visibles.length}
             </div>
           </div>
-          <div className="rounded-xl bg-neutral-900 px-4 py-2 text-right">
-            <div className="text-xs uppercase tracking-wide text-neutral-500">
+          <div className="rounded-xl bg-white px-4 py-2 text-right shadow-sm dark:bg-neutral-900">
+            <div className="text-xs uppercase tracking-wide text-neutral-600 dark:text-neutral-500">
               {t("kds.hora")}
             </div>
-            <div className="font-mono text-2xl font-bold tabular-nums text-white">
+            <div className="font-mono text-2xl font-bold tabular-nums text-neutral-900 dark:text-white">
               {formatearReloj(ahoraMs)}
             </div>
           </div>
@@ -237,18 +240,18 @@ export default function KdsPage() {
       {conError && (
         <div
           role="status"
-          className="mb-4 rounded-lg border border-red-700 bg-red-950 px-4 py-2 text-sm font-semibold text-red-300"
+          className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 dark:border-red-700 dark:bg-red-950 dark:text-red-300"
         >
           {t("kds.sinConexionBanner")}
         </div>
       )}
 
       {cargandoInicial ? (
-        <div className="grid place-items-center py-24 text-xl text-neutral-500">
+        <div className="grid place-items-center py-24 text-xl text-neutral-600 dark:text-neutral-500">
           {t("kds.cargandoComandas")}
         </div>
       ) : visibles.length === 0 ? (
-        <div className="grid place-items-center py-24 text-center text-neutral-500">
+        <div className="grid place-items-center py-24 text-center text-neutral-600 dark:text-neutral-500">
           <div className="text-2xl font-bold">{t("kds.sinComandas")}</div>
           <div className="mt-1 text-sm">{t("kds.cocinaAlDia")}</div>
         </div>
@@ -270,6 +273,7 @@ export default function KdsPage() {
           })}
         </div>
       )}
+      </div>
     </main>
   );
 }

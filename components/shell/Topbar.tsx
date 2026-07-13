@@ -2,8 +2,13 @@
 
 /**
  * Barra superior del shell: hamburguesa (< lg, abre el sidebar izquierdo),
- * saludo del usuario, selector de idioma, toggle de tema, campana de
- * notificaciones (abre el panel DERECHO) y boton de logout.
+ * saludo del usuario, selector de idioma, toggle de tema y campana de
+ * notificaciones (abre el panel DERECHO).
+ *
+ * El boton de logout ("Cerrar sesion") vivia aqui antes; se movio al bloque
+ * inferior del sidebar izquierdo (ver components/shell/Sidebar.tsx,
+ * `manejarLogout`) a pedido de producto, junto al nuevo boton "Gestionar
+ * perfiles". El saludo al usuario SIGUE aqui.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -25,7 +30,7 @@ interface TopbarProps {
 }
 
 export default function Topbar({ onAbrirSidebar }: TopbarProps) {
-  const { usuarioActual, logout } = useSesion();
+  const { usuarioActual } = useSesion();
   const { t } = useI18n();
   const router = useRouter();
 
@@ -61,11 +66,6 @@ export default function Topbar({ onAbrirSidebar }: TopbarProps) {
       }
     }
     if (n.entidadRelacionadaHref) router.push(n.entidadRelacionadaHref);
-  }
-
-  function manejarLogout() {
-    logout();
-    router.push("/login");
   }
 
   return (
@@ -133,14 +133,6 @@ export default function Topbar({ onAbrirSidebar }: TopbarProps) {
             onClicNotificacion={manejarClicNotificacion}
           />
         </div>
-
-        <button
-          type="button"
-          onClick={manejarLogout}
-          className="grid h-11 shrink-0 place-items-center rounded-lg px-2 text-sm font-bold text-ck-red hover:bg-ck-cream dark:hover:bg-neutral-800 sm:px-3"
-        >
-          {t("topbar.cerrarSesion")}
-        </button>
       </div>
     </header>
   );

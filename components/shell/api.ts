@@ -93,3 +93,24 @@ export async function marcarNotificacionLeida(id: string): Promise<Notificacion>
   );
   return notificacion;
 }
+
+/** Lista de referencia de roles RBAC (para mostrar el nombre de rol de cada Usuario en "Gestionar perfiles"). */
+export async function listarRoles(): Promise<Rol[]> {
+  const { roles } = await solicitar<{ roles: Rol[] }>("/roles");
+  return roles;
+}
+
+/** Lista de Usuario (sin pinHash) para el modal "Gestionar perfiles" del sidebar (permiso "usuarios.gestionar"). */
+export async function listarUsuarios(): Promise<UsuarioSinPin[]> {
+  const { usuarios } = await solicitar<{ usuarios: UsuarioSinPin[] }>("/auth/usuarios");
+  return usuarios;
+}
+
+/** Cambia el PIN de acceso de un Usuario (4 digitos numericos; validado tambien server-side). */
+export async function cambiarPinUsuario(usuarioId: string, pin: string): Promise<UsuarioSinPin> {
+  const { usuario } = await solicitar<{ usuario: UsuarioSinPin }>(
+    `/auth/usuarios/${usuarioId}/pin`,
+    { method: "PATCH", body: JSON.stringify({ pin }) }
+  );
+  return usuario;
+}

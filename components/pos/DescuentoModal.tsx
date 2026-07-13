@@ -44,9 +44,9 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
-        <h2 className="mb-1 text-lg font-bold text-ck-dark">{t("pos.descuento.titulo")}</h2>
-        <p className="mb-4 text-xs text-neutral-500">
+      <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl dark:bg-neutral-900">
+        <h2 className="mb-1 text-lg font-bold text-ck-dark dark:text-neutral-100">{t("pos.descuento.titulo")}</h2>
+        <p className="mb-4 text-xs text-neutral-600 dark:text-neutral-400">
           {t("pos.descuento.subtotalActual", { monto: formatearDinero(pedido.subtotal) })}
         </p>
 
@@ -55,7 +55,7 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
             type="button"
             onClick={() => setTipo("porcentaje")}
             className={`flex-1 rounded-xl py-2 text-sm font-semibold ${
-              tipo === "porcentaje" ? "bg-ck-red text-white" : "bg-neutral-100 text-ck-dark"
+              tipo === "porcentaje" ? "bg-ck-red text-white" : "bg-neutral-100 text-ck-dark dark:bg-neutral-800 dark:text-neutral-100"
             }`}
           >
             {t("pos.descuento.porcentaje")}
@@ -64,7 +64,7 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
             type="button"
             onClick={() => setTipo("monto")}
             className={`flex-1 rounded-xl py-2 text-sm font-semibold ${
-              tipo === "monto" ? "bg-ck-red text-white" : "bg-neutral-100 text-ck-dark"
+              tipo === "monto" ? "bg-ck-red text-white" : "bg-neutral-100 text-ck-dark dark:bg-neutral-800 dark:text-neutral-100"
             }`}
           >
             {t("pos.descuento.montoFijo")}
@@ -81,7 +81,7 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
                 className={`flex-1 rounded-xl border py-2 text-sm font-semibold ${
                   porcentaje === p
                     ? "border-ck-red bg-ck-red text-white"
-                    : "border-neutral-300 text-ck-dark"
+                    : "border-neutral-300 text-ck-dark dark:border-neutral-600 dark:text-neutral-100"
                 }`}
               >
                 {p}%
@@ -90,7 +90,7 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
           </div>
         ) : (
           <div className="mb-4">
-            <label className="mb-1 block text-xs font-semibold text-neutral-600">
+            <label className="mb-1 block text-xs font-semibold text-neutral-600 dark:text-neutral-400">
               {t("pos.descuento.montoLabel")}
             </label>
             <input
@@ -99,14 +99,14 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
               step="0.01"
               value={montoTexto}
               onChange={(e) => setMontoTexto(e.target.value)}
-              className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm text-ck-dark dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
               placeholder="0.00"
             />
           </div>
         )}
 
         <div className="mb-4">
-          <label className="mb-1 block text-xs font-semibold text-neutral-600">
+          <label className="mb-1 block text-xs font-semibold text-neutral-600 dark:text-neutral-400">
             {t("pos.descuento.motivoLabel")}
           </label>
           <input
@@ -114,18 +114,18 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
             value={motivo}
             onChange={(e) => setMotivo(e.target.value)}
             placeholder={t("pos.descuento.motivoPlaceholder")}
-            className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+            className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm text-ck-dark dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
             maxLength={140}
           />
         </div>
 
-        {error && <p className="mb-3 text-sm font-semibold text-ck-red">{error}</p>}
+        {error && <p className="mb-3 text-sm font-semibold text-ck-red dark:text-red-400">{error}</p>}
 
         <div className="flex gap-3">
           <button
             type="button"
             onClick={onCancelar}
-            className="flex-1 rounded-xl border border-neutral-300 py-3 text-sm font-semibold text-neutral-600"
+            className="flex-1 rounded-xl border border-neutral-300 py-3 text-sm font-semibold text-neutral-600 dark:border-neutral-600 dark:text-neutral-300"
           >
             {t("pos.descuento.cancelar")}
           </button>
@@ -134,7 +134,7 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
             disabled={!formularioValido || enviando}
             onClick={confirmar}
             className={`flex-1 rounded-xl py-3 text-sm font-bold text-white ${
-              !formularioValido || enviando ? "cursor-not-allowed bg-neutral-300" : "bg-ck-red"
+              !formularioValido || enviando ? "cursor-not-allowed bg-neutral-300 dark:bg-neutral-700" : "bg-ck-red"
             }`}
           >
             {enviando ? t("pos.descuento.aplicando") : t("pos.descuento.aplicar")}

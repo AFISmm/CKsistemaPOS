@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/lib/shell/I18nProvider";
+import FondoFoto from "@/components/shell/FondoFoto";
 import { textoErrorApi } from "@/lib/i18n/erroresApi";
 import type { Pago, Pedido, Producto } from "@/lib/domain/types";
 import {
@@ -262,27 +263,33 @@ export default function TerminalCajeroPage() {
 
   if (cargandoInicial) {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-ck-cream">
-        <Image src="/cropped-Logo.webp" alt="Chicken Kitchen" width={160} height={64} priority />
-        <p className="text-sm text-neutral-500">{t("pos.cargandoTerminal")}</p>
+      <main className="relative flex min-h-screen flex-col items-center justify-center gap-4 overflow-hidden bg-ck-cream dark:bg-neutral-950">
+        <FondoFoto />
+        <div className="relative z-10 flex flex-col items-center gap-4">
+          <Image src="/cropped-Logo.webp" alt="Chicken Kitchen" width={160} height={64} priority />
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">{t("pos.cargandoTerminal")}</p>
+        </div>
       </main>
     );
   }
 
   if (errorInicial || !pedido || !catalogo) {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-ck-cream p-6 text-center">
-        <Image src="/cropped-Logo.webp" alt="Chicken Kitchen" width={160} height={64} priority />
-        <p className="max-w-md text-sm font-semibold text-ck-red">
-          {errorInicial ?? t("pos.errorCargaTerminal")}
-        </p>
-        <button
-          type="button"
-          onClick={iniciar}
-          className="rounded-xl bg-ck-red px-6 py-3 text-base font-bold text-white active:scale-95"
-        >
-          {t("pos.reintentar")}
-        </button>
+      <main className="relative flex min-h-screen flex-col items-center justify-center gap-4 overflow-hidden bg-ck-cream p-6 text-center dark:bg-neutral-950">
+        <FondoFoto />
+        <div className="relative z-10 flex flex-col items-center gap-4">
+          <Image src="/cropped-Logo.webp" alt="Chicken Kitchen" width={160} height={64} priority />
+          <p className="max-w-md text-sm font-semibold text-ck-red dark:text-red-400">
+            {errorInicial ?? t("pos.errorCargaTerminal")}
+          </p>
+          <button
+            type="button"
+            onClick={iniciar}
+            className="rounded-xl bg-ck-red px-6 py-3 text-base font-bold text-white active:scale-95"
+          >
+            {t("pos.reintentar")}
+          </button>
+        </div>
       </main>
     );
   }
@@ -295,13 +302,14 @@ export default function TerminalCajeroPage() {
     : [];
 
   return (
-    <main className="pos-notouch flex min-h-screen flex-col bg-ck-cream">
-      <header className="flex items-center justify-between border-b border-neutral-200 bg-white px-4 py-3 shadow-sm">
+    <main className="pos-notouch relative flex min-h-screen flex-col overflow-hidden bg-ck-cream dark:bg-neutral-950">
+      <FondoFoto />
+      <header className="relative z-10 flex items-center justify-between border-b border-neutral-200 bg-white px-4 py-3 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
         <div className="flex items-center gap-3">
           <Image src="/cropped-Logo.webp" alt="Chicken Kitchen" width={100} height={40} priority />
           <div>
-            <p className="text-sm font-bold text-ck-dark">{t("pos.headerTitulo")}</p>
-            <p className="text-xs text-neutral-500">
+            <p className="text-sm font-bold text-ck-dark dark:text-neutral-100">{t("pos.headerTitulo")}</p>
+            <p className="text-xs text-neutral-600 dark:text-neutral-400">
               Miami, FL &middot; 15738 SW 72nd Street
             </p>
           </div>
@@ -323,7 +331,7 @@ export default function TerminalCajeroPage() {
       </header>
 
       {errorGlobal && (
-        <div className="flex items-center justify-between bg-red-50 px-4 py-2 text-sm text-ck-red">
+        <div className="relative z-10 flex items-center justify-between bg-red-50 px-4 py-2 text-sm text-ck-red dark:bg-red-950/40 dark:text-red-300">
           <span>{errorGlobal}</span>
           <button type="button" onClick={() => setErrorGlobal(null)} className="font-bold">
             &times;
@@ -331,7 +339,7 @@ export default function TerminalCajeroPage() {
         </div>
       )}
 
-      <div className="flex flex-1 flex-col gap-4 p-4 lg:flex-row">
+      <div className="relative z-10 flex flex-1 flex-col gap-4 p-4 lg:flex-row">
         <section className="flex-1">
           <CategoriasTabs
             categorias={catalogo.categorias}
@@ -340,7 +348,7 @@ export default function TerminalCajeroPage() {
           />
           <div className="mt-4">
             {agregandoLinea && (
-              <p className="mb-2 text-xs font-semibold text-neutral-400">{t("pos.agregandoAlTicket")}</p>
+              <p className="mb-2 text-xs font-semibold text-neutral-600 dark:text-neutral-400">{t("pos.agregandoAlTicket")}</p>
             )}
             <ProductosGrid
               productos={productosDeCategoria}

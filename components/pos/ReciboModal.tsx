@@ -45,20 +45,20 @@ export default function ReciboModal({ pedido, pagos, onNuevoPedido }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-xl">
+      <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-xl dark:bg-neutral-900">
         <div className="mb-2 text-4xl">✓</div>
-        <h2 className="text-xl font-bold text-ck-dark">{t("pos.recibo.pagoCompletado")}</h2>
-        <p className="mb-4 text-sm text-neutral-500">
+        <h2 className="text-xl font-bold text-ck-dark dark:text-neutral-100">{t("pos.recibo.pagoCompletado")}</h2>
+        <p className="mb-4 text-sm text-neutral-600 dark:text-neutral-400">
           {t("pos.recibo.orden", { numero: pedido.numeroOrden })}
         </p>
 
-        <div className="mb-4 rounded-xl bg-neutral-50 p-4 text-left text-sm">
-          <p className="mb-2 text-xs font-semibold uppercase text-neutral-500">
+        <div className="mb-4 rounded-xl bg-neutral-50 p-4 text-left text-sm dark:bg-neutral-800">
+          <p className="mb-2 text-xs font-semibold uppercase text-neutral-600 dark:text-neutral-400">
             {t("pos.recibo.detalle")}
           </p>
           <ul className="mb-3 space-y-1">
             {pedido.lineas.map((linea) => (
-              <li key={linea.id} className="flex justify-between text-neutral-700">
+              <li key={linea.id} className="flex justify-between text-neutral-700 dark:text-neutral-200">
                 <span>
                   {linea.cantidad}x {linea.descripcion}
                 </span>
@@ -66,41 +66,41 @@ export default function ReciboModal({ pedido, pagos, onNuevoPedido }: Props) {
               </li>
             ))}
           </ul>
-          <div className="space-y-1 border-t border-neutral-200 pt-2">
-            <div className="flex justify-between text-neutral-600">
+          <div className="space-y-1 border-t border-neutral-200 pt-2 dark:border-neutral-700">
+            <div className="flex justify-between text-neutral-600 dark:text-neutral-300">
               <span>{t("pos.recibo.subtotal")}</span>
               <span>{formatearDinero(pedido.subtotal)}</span>
             </div>
-            <div className="flex justify-between text-neutral-600">
+            <div className="flex justify-between text-neutral-600 dark:text-neutral-300">
               <span>{t("pos.recibo.descuento")}</span>
               <span>-{formatearDinero(pedido.descuentoTotal)}</span>
             </div>
-            <div className="flex justify-between text-neutral-600">
+            <div className="flex justify-between text-neutral-600 dark:text-neutral-300">
               <span>{t("pos.recibo.impuesto")}</span>
               <span>{formatearDinero(pedido.impuestoTotal)}</span>
             </div>
-            <div className="flex justify-between text-neutral-600">
+            <div className="flex justify-between text-neutral-600 dark:text-neutral-300">
               <span>{t("pos.recibo.propina")}</span>
               <span>{formatearDinero(pedido.propinaTotal)}</span>
             </div>
-            <div className="flex justify-between text-base font-bold text-ck-dark">
+            <div className="flex justify-between text-base font-bold text-ck-dark dark:text-neutral-100">
               <span>{t("pos.recibo.total")}</span>
               <span>{formatearDinero(pedido.total)}</span>
             </div>
             {totalCambio > 0 && (
-              <div className="flex justify-between text-neutral-600">
+              <div className="flex justify-between text-neutral-600 dark:text-neutral-300">
                 <span>{t("pos.recibo.cambioEntregado")}</span>
                 <span>{formatearDinero(totalCambio)}</span>
               </div>
             )}
           </div>
 
-          <p className="mb-1 mt-3 text-xs font-semibold uppercase text-neutral-500">
+          <p className="mb-1 mt-3 text-xs font-semibold uppercase text-neutral-600 dark:text-neutral-400">
             {t("pos.recibo.metodosPago")}
           </p>
           <ul className="space-y-1">
             {pagos.map((p) => (
-              <li key={p.id} className="flex justify-between text-neutral-700">
+              <li key={p.id} className="flex justify-between text-neutral-700 dark:text-neutral-200">
                 <span>
                   {p.metodo === "efectivo" ? t("pos.cobro.efectivo") : t("pos.cobro.tarjeta")}
                   {p.ultimos4 ? ` ****${p.ultimos4}` : ""} ·{" "}
@@ -112,7 +112,7 @@ export default function ReciboModal({ pedido, pagos, onNuevoPedido }: Props) {
           </ul>
         </div>
 
-        <p className="mb-4 text-xs font-medium text-green-700">
+        <p className="mb-4 text-xs font-medium text-green-700 dark:text-green-400">
           {impreso ? t("pos.recibo.impreso") : t("pos.recibo.imprimiendo")}
         </p>
 

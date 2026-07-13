@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { formatearDinero, type Pedido, type Stock } from "@/lib/domain/types";
 import { useI18n } from "@/lib/shell/I18nProvider";
+import FondoFoto from "@/components/shell/FondoFoto";
 
 const CLAVE_ESTADO_PEDIDO: Record<string, string> = {
   abierto: "reportes.estadoPedido.abierto",
@@ -62,20 +63,21 @@ export default function ReportesPage() {
   const propinas = cobrados.reduce((s, p) => s + (p.propinaTotal ?? 0), 0);
 
   return (
-    <main className="min-h-screen bg-ck-cream p-6">
-      <div className="mx-auto max-w-4xl">
+    <main className="relative min-h-screen overflow-hidden bg-ck-cream p-6 dark:bg-neutral-950">
+      <FondoFoto />
+      <div className="relative z-10 mx-auto max-w-4xl">
         <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-ck-dark">{t("reportes.titulo")}</h1>
-          <Link href="/" className="text-sm text-ck-red underline">
+          <h1 className="text-2xl font-bold text-ck-dark dark:text-neutral-100">{t("reportes.titulo")}</h1>
+          <Link href="/" className="text-sm text-ck-red underline dark:text-red-400">
             {t("reportes.inicio")}
           </Link>
         </div>
-        <p className="mb-6 text-sm text-neutral-600">
+        <p className="mb-6 text-sm text-neutral-600 dark:text-neutral-400">
           {t("reportes.subtitulo")}
         </p>
 
         {error && (
-          <div className="mb-4 rounded-lg bg-red-100 p-3 text-sm text-red-700">
+          <div className="mb-4 rounded-lg bg-red-100 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
             {error}
           </div>
         )}
@@ -87,31 +89,31 @@ export default function ReportesPage() {
           <Tarjeta titulo={t("reportes.propinas")} valor={formatearDinero(propinas)} />
         </div>
 
-        <h2 className="mb-2 mt-8 text-lg font-semibold text-ck-dark">
+        <h2 className="mb-2 mt-8 text-lg font-semibold text-ck-dark dark:text-neutral-100">
           {t("reportes.stockBajoTitulo")}
         </h2>
         {bajoStock.length === 0 ? (
-          <p className="text-sm text-neutral-500">{t("reportes.sinAlertasStock")}</p>
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">{t("reportes.sinAlertasStock")}</p>
         ) : (
           <ul className="space-y-1">
             {bajoStock.map((b, i) => (
               <li
                 key={i}
-                className="rounded-lg bg-white p-3 text-sm shadow-sm"
+                className="rounded-lg bg-white p-3 text-sm text-neutral-800 shadow-sm dark:bg-neutral-900 dark:text-neutral-200"
               >
-                <span className="font-medium">{b.nombre}</span>: {b.cantidadActual}{" "}
+                <span className="font-medium text-ck-dark dark:text-neutral-100">{b.nombre}</span>: {b.cantidadActual}{" "}
                 ({t("reportes.umbral", { umbral: b.umbral })})
               </li>
             ))}
           </ul>
         )}
 
-        <h2 className="mb-2 mt-8 text-lg font-semibold text-ck-dark">
+        <h2 className="mb-2 mt-8 text-lg font-semibold text-ck-dark dark:text-neutral-100">
           {t("reportes.pedidosTitulo", { n: pedidos.length })}
         </h2>
-        <div className="overflow-hidden rounded-lg bg-white shadow-sm">
+        <div className="overflow-hidden rounded-lg bg-white shadow-sm dark:bg-neutral-900">
           <table className="w-full text-left text-sm">
-            <thead className="bg-neutral-100 text-neutral-600">
+            <thead className="bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
               <tr>
                 <th className="p-2">#</th>
                 <th className="p-2">{t("reportes.colCliente")}</th>
@@ -121,7 +123,7 @@ export default function ReportesPage() {
             </thead>
             <tbody>
               {pedidos.map((p) => (
-                <tr key={p.id} className="border-t border-neutral-100">
+                <tr key={p.id} className="border-t border-neutral-100 text-neutral-800 dark:border-neutral-800 dark:text-neutral-200">
                   <td className="p-2">{p.numeroOrden}</td>
                   <td className="p-2">{p.nombreCliente || "—"}</td>
                   <td className="p-2">{t(CLAVE_ESTADO_PEDIDO[p.estado] ?? "") || p.estado}</td>
@@ -138,11 +140,11 @@ export default function ReportesPage() {
 
 function Tarjeta({ titulo, valor }: { titulo: string; valor: string }) {
   return (
-    <div className="rounded-xl bg-white p-4 shadow-sm">
-      <div className="text-xs uppercase tracking-wide text-neutral-500">
+    <div className="rounded-xl bg-white p-4 shadow-sm dark:bg-neutral-900">
+      <div className="text-xs uppercase tracking-wide text-neutral-600 dark:text-neutral-400">
         {titulo}
       </div>
-      <div className="mt-1 text-xl font-bold text-ck-dark">{valor}</div>
+      <div className="mt-1 text-xl font-bold text-ck-dark dark:text-neutral-100">{valor}</div>
     </div>
   );
 }

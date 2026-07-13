@@ -53,7 +53,7 @@ export default function OrderCard({
   return (
     <section
       aria-label={t("kds.comandaAria", { numero: pedido.numeroOrden })}
-      className={`flex flex-col rounded-2xl border-4 bg-neutral-900 shadow-lg transition-opacity duration-700 ${clases.borde} ${
+      className={`flex flex-col rounded-2xl border-4 bg-white shadow-lg transition-opacity duration-700 dark:bg-neutral-900 ${clases.borde} ${
         atenuado ? "opacity-40" : "opacity-100"
       }`}
     >
@@ -72,16 +72,16 @@ export default function OrderCard({
       {/* Cabecera: numero, cliente, cronometro */}
       <div className="flex items-center justify-between px-4 pt-3">
         <div>
-          <div className="text-4xl font-black leading-none text-white">
+          <div className="text-4xl font-black leading-none text-neutral-900 dark:text-white">
             #{pedido.numeroOrden}
           </div>
-          <div className="mt-1 max-w-[10rem] truncate text-lg font-semibold text-neutral-300">
+          <div className="mt-1 max-w-[10rem] truncate text-lg font-semibold text-neutral-600 dark:text-neutral-300">
             {pedido.nombreCliente || t("kds.cliente")}
           </div>
         </div>
         <div
           className={`rounded-lg px-3 py-2 text-right font-mono text-3xl font-bold tabular-nums ${
-            enAlerta ? "animate-pulse bg-red-700 text-white" : "text-neutral-200"
+            enAlerta ? "animate-pulse bg-red-700 text-white" : "text-neutral-700 dark:text-neutral-200"
           }`}
           aria-label={t("kds.tiempoAria")}
         >
@@ -99,13 +99,13 @@ export default function OrderCard({
         {pedido.lineas.map((linea) => (
           <div
             key={linea.id}
-            className="rounded-lg bg-neutral-800/70 px-3 py-2 leading-snug"
+            className="rounded-lg bg-neutral-100 px-3 py-2 leading-snug dark:bg-neutral-800/70"
           >
             <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-black text-white">
+              <span className="text-2xl font-black text-neutral-900 dark:text-white">
                 {linea.cantidad}×
               </span>
-              <span className="text-xl font-semibold text-white">
+              <span className="text-xl font-semibold text-neutral-900 dark:text-white">
                 {linea.descripcion}
               </span>
               <span
@@ -124,10 +124,10 @@ export default function OrderCard({
                     key={m.id}
                     className={`text-base font-medium ${
                       m.tipo === "sin"
-                        ? "text-red-400"
+                        ? "text-red-600 dark:text-red-400"
                         : m.tipo === "sustituir"
-                          ? "text-sky-300"
-                          : "text-lime-300"
+                          ? "text-sky-700 dark:text-sky-300"
+                          : "text-lime-700 dark:text-lime-300"
                     }`}
                   >
                     {m.tipo === "sin"
@@ -141,7 +141,7 @@ export default function OrderCard({
             )}
 
             {linea.notas && (
-              <div className="mt-1 ml-8 text-base italic text-yellow-300">
+              <div className="mt-1 ml-8 text-base italic text-yellow-700 dark:text-yellow-300">
                 {t("kds.nota", { nota: linea.notas })}
               </div>
             )}

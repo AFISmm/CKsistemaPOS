@@ -19,7 +19,7 @@ export default function CategoriasTabs({ categorias, categoriaActivaId, onSelecc
 
   if (activas.length === 0) {
     return (
-      <p className="p-4 text-sm text-neutral-500">{t("pos.categorias.vacio")}</p>
+      <p className="p-4 text-sm text-neutral-600 dark:text-neutral-400">{t("pos.categorias.vacio")}</p>
     );
   }
 
@@ -37,7 +37,7 @@ export default function CategoriasTabs({ categorias, categoriaActivaId, onSelecc
             className={`min-h-[56px] flex-shrink-0 whitespace-nowrap rounded-xl px-5 py-3 text-base font-semibold shadow-sm transition active:scale-95 ${
               activa
                 ? "bg-ck-red text-white"
-                : "bg-white text-ck-dark border border-neutral-200 hover:border-ck-red"
+                : "border border-neutral-200 bg-white text-ck-dark hover:border-ck-red dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
             }`}
           >
             {cat.nombre}

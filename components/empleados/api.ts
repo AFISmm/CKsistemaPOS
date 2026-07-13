@@ -6,7 +6,7 @@
  * el bundle de cliente). Tipos de dominio importados con `import type`.
  */
 
-import type { Empleado, Marcaje, Rol, Ubicacion } from "@/lib/domain/types";
+import type { Empleado, HorarioTurno, Marcaje, Rol, Ubicacion } from "@/lib/domain/types";
 import type { IntervaloTrabajado } from "@/lib/rrhh/asistencia";
 
 const BASE_URL = "/api/v1";
@@ -205,4 +205,42 @@ export async function obtenerResumenHoras(
     `/asistencia/resumen?${qs.toString()}`
   );
   return resumen;
+}
+
+export interface NuevoHorarioBody {
+  empleadoId: string;
+  ubicacionId?: string;
+  fecha: string; // YYYY-MM-DD
+  horaInicioProgramada: string; // HH:MM 24h
+  horaFinProgramada: string; // HH:MM 24h
+}
+
+export interface HorarioCreadoResponse {
+  horario: HorarioTurno;
+  /** Minutos totales programados para esa semana (lunes-domingo), incluyendo este horario. */
+  minutosTotalesSemana: number;
+}
+
+export async function listarHorarios(filtro: {
+  empleadoId?: string;
+  ubicacionId?: string;
+  desde?: string;
+  hasta?: string;
+}): Promise<HorarioTurno[]> {
+  const qs = new URLSearchParams();
+  if (filtro.empleadoId) qs.set("empleadoId", filtro.empleadoId);
+  if (filtro.ubicacionId) qs.set("ubicacionId", filtro.ubicacionId);
+  if (filtro.desde) qs.set("desde", filtro.desde);
+  if (filtro.hasta) qs.set("hasta", filtro.hasta);
+  const { horarios } = await solicitar<{ horarios: HorarioTurno[] }>(
+    `/horarios${qs.toString() ? `?${qs.toString()}` : ""}`
+  );
+  return horarios;
+}
+
+export async function crearHorario(body: NuevoHorarioBody): Promise<HorarioCreadoResponse> {
+  return solicitar<HorarioCreadoResponse>("/horarios", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }

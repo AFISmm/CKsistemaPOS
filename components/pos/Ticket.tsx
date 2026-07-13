@@ -40,8 +40,8 @@ export default function Ticket({
 
   if (!pedido) {
     return (
-      <aside className="flex w-full flex-col rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm lg:w-96">
-        <p className="text-sm text-neutral-400">{t("pos.ticket.cargandoPedido")}</p>
+      <aside className="flex w-full flex-col rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-700 dark:bg-neutral-900 lg:w-96">
+        <p className="text-sm text-neutral-600 dark:text-neutral-400">{t("pos.ticket.cargandoPedido")}</p>
       </aside>
     );
   }
@@ -52,18 +52,18 @@ export default function Ticket({
   const yaEnviado = pedido.estado !== "abierto";
 
   return (
-    <aside className="flex w-full flex-col rounded-2xl border border-neutral-200 bg-white shadow-sm lg:w-96">
-      <div className="flex items-center justify-between border-b border-neutral-200 p-4">
+    <aside className="flex w-full flex-col rounded-2xl border border-neutral-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900 lg:w-96">
+      <div className="flex items-center justify-between border-b border-neutral-200 p-4 dark:border-neutral-700">
         <div>
-          <h2 className="text-lg font-bold text-ck-dark">
+          <h2 className="text-lg font-bold text-ck-dark dark:text-neutral-100">
             {t("pos.ticket.orden", { numero: pedido.numeroOrden })}
           </h2>
-          <p className="text-xs text-neutral-500">
+          <p className="text-xs text-neutral-600 dark:text-neutral-400">
             {pedido.nombreCliente || t("pos.ticket.clienteMostrador")}
           </p>
         </div>
         {yaEnviado && (
-          <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
+          <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700 dark:bg-green-900/30 dark:text-green-300">
             {t("pos.ticket.enviadoACocina")}
           </span>
         )}
@@ -71,7 +71,7 @@ export default function Ticket({
 
       <div className="max-h-[45vh] flex-1 overflow-y-auto p-4">
         {!hayLineas && (
-          <p className="py-6 text-center text-sm text-neutral-400">
+          <p className="py-6 text-center text-sm text-neutral-500 dark:text-neutral-400">
             {t("pos.ticket.tocaProducto")}
           </p>
         )}
@@ -79,14 +79,14 @@ export default function Ticket({
           {pedido.lineas.map((linea) => {
             const bloqueada = actualizandoLineaId === linea.id;
             return (
-              <li key={linea.id} className="rounded-lg border border-neutral-100 p-3">
+              <li key={linea.id} className="rounded-lg border border-neutral-100 p-3 dark:border-neutral-800">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1">
-                    <p className="text-sm font-semibold text-ck-dark">{linea.descripcion}</p>
+                    <p className="text-sm font-semibold text-ck-dark dark:text-neutral-100">{linea.descripcion}</p>
                     {linea.modificadores.length > 0 && (
                       <ul className="mt-1 space-y-0.5">
                         {linea.modificadores.map((mod) => (
-                          <li key={mod.id} className="text-xs text-neutral-500">
+                          <li key={mod.id} className="text-xs text-neutral-600 dark:text-neutral-400">
                             {mod.tipo === "sin"
                               ? t("pos.ticket.modSinPrefijo")
                               : t("pos.ticket.modAgregarPrefijo")}
@@ -97,7 +97,7 @@ export default function Ticket({
                       </ul>
                     )}
                     {linea.notas && (
-                      <p className="mt-1 text-xs italic text-neutral-400">
+                      <p className="mt-1 text-xs italic text-neutral-500 dark:text-neutral-400">
                         {t("pos.ticket.notaPrefijo", { nota: linea.notas })}
                       </p>
                     )}
@@ -107,7 +107,7 @@ export default function Ticket({
                       </span>
                     )}
                   </div>
-                  <span className="whitespace-nowrap text-sm font-bold text-ck-dark">
+                  <span className="whitespace-nowrap text-sm font-bold text-ck-dark dark:text-neutral-100">
                     {formatearDinero(linea.subtotalLinea)}
                   </span>
                 </div>
@@ -117,17 +117,17 @@ export default function Ticket({
                       type="button"
                       disabled={bloqueada}
                       onClick={() => onCambiarCantidad(linea.id, linea.cantidad - 1)}
-                      className="h-9 w-9 rounded-full bg-neutral-200 text-lg font-bold text-ck-dark active:scale-95 disabled:opacity-40"
+                      className="h-9 w-9 rounded-full bg-neutral-200 text-lg font-bold text-ck-dark active:scale-95 disabled:opacity-40 dark:bg-neutral-700 dark:text-neutral-100"
                       aria-label={t("pos.ticket.restarUnidad")}
                     >
                       -
                     </button>
-                    <span className="w-6 text-center font-semibold">{linea.cantidad}</span>
+                    <span className="w-6 text-center font-semibold text-ck-dark dark:text-neutral-100">{linea.cantidad}</span>
                     <button
                       type="button"
                       disabled={bloqueada}
                       onClick={() => onCambiarCantidad(linea.id, linea.cantidad + 1)}
-                      className="h-9 w-9 rounded-full bg-neutral-200 text-lg font-bold text-ck-dark active:scale-95 disabled:opacity-40"
+                      className="h-9 w-9 rounded-full bg-neutral-200 text-lg font-bold text-ck-dark active:scale-95 disabled:opacity-40 dark:bg-neutral-700 dark:text-neutral-100"
                       aria-label={t("pos.ticket.sumarUnidad")}
                     >
                       +
@@ -137,7 +137,7 @@ export default function Ticket({
                     type="button"
                     disabled={bloqueada}
                     onClick={() => onEliminarLinea(linea.id)}
-                    className="text-xs font-semibold text-ck-red underline disabled:opacity-40"
+                    className="text-xs font-semibold text-ck-red underline disabled:opacity-40 dark:text-red-400"
                   >
                     {t("pos.ticket.quitar")}
                   </button>
@@ -148,24 +148,24 @@ export default function Ticket({
         </ul>
       </div>
 
-      <div className="space-y-1 border-t border-neutral-200 p-4 text-sm">
-        <div className="flex justify-between text-neutral-600">
+      <div className="space-y-1 border-t border-neutral-200 p-4 text-sm dark:border-neutral-700">
+        <div className="flex justify-between text-neutral-600 dark:text-neutral-300">
           <span>{t("pos.ticket.subtotal")}</span>
           <span>{formatearDinero(pedido.subtotal)}</span>
         </div>
-        <div className="flex justify-between text-neutral-600">
+        <div className="flex justify-between text-neutral-600 dark:text-neutral-300">
           <span>{t("pos.ticket.descuento")}</span>
           <span>-{formatearDinero(pedido.descuentoTotal)}</span>
         </div>
-        <div className="flex justify-between text-neutral-600">
+        <div className="flex justify-between text-neutral-600 dark:text-neutral-300">
           <span>{t("pos.ticket.impuesto")}</span>
           <span>{formatearDinero(pedido.impuestoTotal)}</span>
         </div>
-        <div className="flex justify-between text-neutral-600">
+        <div className="flex justify-between text-neutral-600 dark:text-neutral-300">
           <span>{t("pos.ticket.propina")}</span>
           <span>{formatearDinero(pedido.propinaTotal)}</span>
         </div>
-        <div className="flex justify-between border-t border-neutral-200 pt-2 text-lg font-bold text-ck-dark">
+        <div className="flex justify-between border-t border-neutral-200 pt-2 text-lg font-bold text-ck-dark dark:border-neutral-700 dark:text-neutral-100">
           <span>{t("pos.ticket.total")}</span>
           <span>{formatearDinero(pedido.total)}</span>
         </div>

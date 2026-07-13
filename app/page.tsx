@@ -3,6 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useI18n } from "@/lib/shell/I18nProvider";
+import FondoFoto from "@/components/shell/FondoFoto";
 
 export default function Home() {
   const { t } = useI18n();
@@ -17,24 +18,12 @@ export default function Home() {
 
   return (
     <main className="pos-notouch relative min-h-screen overflow-hidden">
-      {/* Foto del local (LOGOchickenkitchen.webp) de fondo, combinada con los
-          colores de marca (rojo/carbon/dorado, ver tailwind.config.ts) via un
-          degradado encima para que el texto siga siendo legible.
-          IMPORTANTE: z-index EXPLICITO (z-0 / z-10) en ambas capas, no
-          negativo — con z-index negativo esta capa terminaba pintandose
-          detras del fondo solido (bg-ck-cream) del layout exterior
-          (AppShell), que no crea su propio contexto de apilamiento, y la
-          foto quedaba practicamente invisible. */}
-      <div className="absolute inset-0 z-0">
-        <Image
-          src="/LOGOchickenkitchen.webp"
-          alt=""
-          fill
-          priority
-          className="object-cover"
-        />
-        <div className="absolute inset-0 bg-gradient-to-b from-ck-dark/70 via-ck-red/35 to-ck-dark/75 dark:from-black/80 dark:via-ck-red/35 dark:to-black/85" />
-      </div>
+      {/* Foto del local + degradado de marca: ver components/shell/FondoFoto.tsx
+          para el mecanismo compartido (foto + overlay + z-index explicitos).
+          Esta pantalla usa la variante "landing" (overlay mas ligero, deja
+          ver mas la foto) que fue la original validada visualmente aqui;
+          las demas paginas de negocio usan la variante "denso". */}
+      <FondoFoto intensidad="landing" />
 
       <div className="relative z-10 flex min-h-screen flex-col items-center justify-center p-8">
         <div className="mb-8 flex flex-col items-center gap-4">

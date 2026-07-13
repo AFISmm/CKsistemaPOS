@@ -92,16 +92,16 @@ export default function ModificadorModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center">
-      <div className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-t-2xl bg-white shadow-xl sm:rounded-2xl">
-        <div className="flex items-start justify-between border-b border-neutral-200 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-t-2xl bg-white shadow-xl dark:bg-neutral-900 sm:rounded-2xl">
+        <div className="flex items-start justify-between border-b border-neutral-200 p-4 dark:border-neutral-800">
           <div>
-            <h2 className="text-lg font-bold text-ck-dark">{producto.nombre}</h2>
-            <p className="text-sm text-neutral-500">{producto.descripcion}</p>
+            <h2 className="text-lg font-bold text-ck-dark dark:text-neutral-100">{producto.nombre}</h2>
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">{producto.descripcion}</p>
           </div>
           <button
             type="button"
             onClick={onCancelar}
-            className="rounded-full p-2 text-2xl leading-none text-neutral-400 hover:bg-neutral-100"
+            className="rounded-full p-2 text-2xl leading-none text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
             aria-label={t("pos.modificador.cerrar")}
           >
             &times;
@@ -116,12 +116,12 @@ export default function ModificadorModal({
             return (
               <div key={grupo.id} className="mb-5">
                 <div className="mb-2 flex items-center justify-between">
-                  <h3 className="text-sm font-bold uppercase tracking-wide text-ck-dark">
+                  <h3 className="text-sm font-bold uppercase tracking-wide text-ck-dark dark:text-neutral-100">
                     {grupo.nombre}
                     {grupo.obligatorio && <span className="ml-1 text-ck-red">*</span>}
                   </h3>
                   <span
-                    className={`text-xs font-medium ${invalido ? "text-ck-red" : "text-neutral-500"}`}
+                    className={`text-xs font-medium ${invalido ? "text-ck-red dark:text-red-400" : "text-neutral-600 dark:text-neutral-400"}`}
                   >
                     {grupo.minSelecciones === grupo.maxSelecciones
                       ? t("pos.modificador.elige", { min: grupo.minSelecciones })
@@ -145,10 +145,10 @@ export default function ModificadorModal({
                         onClick={() => alternarSeleccion(grupo, mod.id)}
                         className={`min-h-[52px] rounded-lg border px-3 py-2 text-sm font-medium transition active:scale-95 ${
                           agotado
-                            ? "cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-400 line-through"
+                            ? "cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-500 line-through dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-500"
                             : elegido
                             ? "border-ck-red bg-ck-red text-white"
-                            : "border-neutral-200 bg-white text-ck-dark hover:border-ck-red"
+                            : "border-neutral-200 bg-white text-ck-dark hover:border-ck-red dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
                         }`}
                       >
                         {mod.nombre}
@@ -167,23 +167,23 @@ export default function ModificadorModal({
           })}
 
           <div className="mb-4">
-            <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-ck-dark">
+            <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-ck-dark dark:text-neutral-100">
               {t("pos.modificador.cantidad")}
             </h3>
             <div className="flex items-center gap-3">
               <button
                 type="button"
                 onClick={() => setCantidad((c) => Math.max(1, c - 1))}
-                className="h-11 w-11 rounded-full bg-neutral-200 text-xl font-bold text-ck-dark active:scale-95"
+                className="h-11 w-11 rounded-full bg-neutral-200 text-xl font-bold text-ck-dark active:scale-95 dark:bg-neutral-700 dark:text-neutral-100"
                 aria-label={t("pos.modificador.restarCantidad")}
               >
                 -
               </button>
-              <span className="w-8 text-center text-lg font-bold">{cantidad}</span>
+              <span className="w-8 text-center text-lg font-bold text-ck-dark dark:text-neutral-100">{cantidad}</span>
               <button
                 type="button"
                 onClick={() => setCantidad((c) => Math.min(20, c + 1))}
-                className="h-11 w-11 rounded-full bg-neutral-200 text-xl font-bold text-ck-dark active:scale-95"
+                className="h-11 w-11 rounded-full bg-neutral-200 text-xl font-bold text-ck-dark active:scale-95 dark:bg-neutral-700 dark:text-neutral-100"
                 aria-label={t("pos.modificador.sumarCantidad")}
               >
                 +
@@ -192,7 +192,7 @@ export default function ModificadorModal({
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-bold uppercase tracking-wide text-ck-dark">
+            <label className="mb-1 block text-sm font-bold uppercase tracking-wide text-ck-dark dark:text-neutral-100">
               {t("pos.modificador.notaOpcional")}
             </label>
             <input
@@ -200,16 +200,16 @@ export default function ModificadorModal({
               value={notas}
               onChange={(e) => setNotas(e.target.value)}
               placeholder={t("pos.modificador.notaPlaceholder")}
-              className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm text-ck-dark dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
               maxLength={140}
             />
           </div>
         </div>
 
-        <div className="border-t border-neutral-200 p-4">
-          <div className="mb-3 flex items-center justify-between text-sm text-neutral-500">
+        <div className="border-t border-neutral-200 p-4 dark:border-neutral-800">
+          <div className="mb-3 flex items-center justify-between text-sm text-neutral-600 dark:text-neutral-400">
             <span>{t("pos.modificador.precioEstimado")}</span>
-            <span className="font-semibold text-ck-dark">
+            <span className="font-semibold text-ck-dark dark:text-neutral-100">
               {formatearDinero(precioEstimadoUnitario * cantidad)}
             </span>
           </div>
@@ -217,7 +217,7 @@ export default function ModificadorModal({
             <button
               type="button"
               onClick={onCancelar}
-              className="flex-1 rounded-xl border border-neutral-300 py-3 text-base font-semibold text-neutral-600 active:scale-95"
+              className="flex-1 rounded-xl border border-neutral-300 py-3 text-base font-semibold text-neutral-600 active:scale-95 dark:border-neutral-700 dark:text-neutral-300"
             >
               {t("pos.modificador.cancelar")}
             </button>
@@ -227,7 +227,7 @@ export default function ModificadorModal({
               onClick={confirmar}
               className={`flex-1 rounded-xl py-3 text-base font-bold text-white active:scale-95 ${
                 !formularioValido || enviando
-                  ? "cursor-not-allowed bg-neutral-300"
+                  ? "cursor-not-allowed bg-neutral-300 dark:bg-neutral-700"
                   : "bg-ck-red hover:bg-red-700"
               }`}
             >

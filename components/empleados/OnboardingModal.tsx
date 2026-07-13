@@ -58,14 +58,14 @@ export default function OnboardingModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-        <h2 className="mb-1 text-lg font-bold text-ck-dark">{t("empleados.modal.nuevoTitulo")}</h2>
-        <p className="mb-4 text-xs text-neutral-500">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl dark:bg-neutral-900">
+        <h2 className="mb-1 text-lg font-bold text-ck-dark dark:text-neutral-100">{t("empleados.modal.nuevoTitulo")}</h2>
+        <p className="mb-4 text-xs text-neutral-600 dark:text-neutral-400">
           {t("empleados.modal.nuevoDescripcion")}
         </p>
 
         {error && (
-          <div className="mb-3 rounded-lg bg-red-50 p-2 text-sm text-ck-red">{error}</div>
+          <div className="mb-3 rounded-lg bg-red-50 p-2 text-sm text-ck-red dark:bg-red-950/40 dark:text-red-300">{error}</div>
         )}
 
         <form onSubmit={manejarSubmit} className="space-y-3">
@@ -141,7 +141,7 @@ export default function OnboardingModal({
             <button
               type="button"
               onClick={onCancelar}
-              className="rounded-xl border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-600"
+              className="rounded-xl border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-600 dark:border-neutral-600 dark:text-neutral-300"
             >
               {t("empleados.modal.cancelar")}
             </button>
@@ -162,6 +162,13 @@ export default function OnboardingModal({
           border: 1px solid #d4d4d4;
           padding: 0.5rem 0.75rem;
           font-size: 0.875rem;
+          color: #1a1a1a;
+          background-color: #ffffff;
+        }
+        .dark .input {
+          border-color: #525252;
+          background-color: #262626;
+          color: #f5f5f5;
         }
       `}</style>
     </div>
@@ -170,7 +177,7 @@ export default function OnboardingModal({
 
 function Campo({ etiqueta, children }: { etiqueta: string; children: React.ReactNode }) {
   return (
-    <label className="block text-xs font-semibold text-neutral-600">
+    <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400">
       {etiqueta}
       <div className="mt-1">{children}</div>
     </label>

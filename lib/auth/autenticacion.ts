@@ -66,3 +66,31 @@ export function obtenerSesion(usuarioId: string): { usuario: UsuarioSinPin; rol:
   }
   return { usuario: sinPin(usuario), rol: rolDe(usuario.rolId) };
 }
+
+/**
+ * Lista todos los Usuario (sin pinHash) para el modal "Gestionar perfiles"
+ * del sidebar (permiso "usuarios.gestionar", ver lib/db/store.ts). DEMO: sin
+ * paginacion, la base es pequena.
+ */
+export function listarUsuarios(): UsuarioSinPin[] {
+  return getDb().usuarios.map(sinPin);
+}
+
+/**
+ * Cambia el PIN de acceso de un Usuario ("Cambiar PIN" del modal "Gestionar
+ * perfiles"). Mismo formato de hash DEMO que el resto de la app
+ * (`"demo:<pin>"`, ver lib/db/store.ts / lib/rrhh/empleados.ts). Se valida
+ * server-side que sea EXACTAMENTE 4 digitos numericos, sin confiar solo en
+ * la validacion del cliente.
+ */
+export function cambiarPin(usuarioId: string, pin: string): UsuarioSinPin {
+  const usuario = getDb().usuarios.find((u) => u.id === usuarioId);
+  if (!usuario) {
+    throw new ErrorAuth("usuario_no_encontrado", `Usuario ${usuarioId} no existe`, 404);
+  }
+  if (!/^\d{4}$/.test(pin ?? "")) {
+    throw new ErrorAuth("pin_invalido", "El PIN debe tener exactamente 4 digitos numericos.", 422);
+  }
+  usuario.pinHash = `demo:${pin}`;
+  return sinPin(usuario);
+}

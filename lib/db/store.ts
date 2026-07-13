@@ -213,6 +213,14 @@ function sembrar(db: Db): void {
         // gerente no mostraba "Pantalla de Cocina" (unico permiso sembrado
         // para /kds es "cocina.actualizarEstado", ver rol-cocina arriba).
         "cocina.actualizarEstado",
+        // Permiso nuevo para el boton "Gestionar perfiles" del sidebar
+        // (shell de UI): lista de Usuario + cambio de PIN. No existia un
+        // permiso RBAC natural para "administrar cuentas de acceso"; se
+        // otorga SOLO a gerente de tienda porque cambiar el PIN de otro
+        // usuario es una operacion de seguridad/gerencial, no de mostrador
+        // ni cocina. Ver components/shell/Sidebar.tsx y
+        // components/shell/GestionarPerfilesModal.tsx.
+        "usuarios.gestionar",
       ],
     }
   );
