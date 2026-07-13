@@ -2,40 +2,70 @@
 
 /**
  * Modal "Gestionar perfiles" — abierto desde el sidebar (permiso
- * "usuarios.gestionar", ver lib/db/store.ts). Lista los Usuario (nombre,
- * rol) y permite cambiar el PIN de acceso de cualquiera de ellos.
+ * "usuarios.gestionar", ver lib/db/store.ts).
  *
- * REGLA DURA: solo habla con el backend via components/shell/api.ts
- * (patron ya establecido por el resto del shell).
+ * Lista EMPLEADOS (no solo Usuario): por cada uno muestra su horario
+ * asignado de la semana actual, permite cambiarlo (reutiliza
+ * components/empleados/AgregarHorarioModal.tsx tal cual, sin duplicar la
+ * logica de aviso de horas extra), muestra/edita su tarifa por hora, y
+ * muestra/cambia su PIN de acceso.
+ *
+ * REGLA DURA: solo habla con el backend via components/shell/api.ts y
+ * components/empleados/api.ts (mismo patron ya establecido por el resto del
+ * shell) — nunca importa lib/db, lib/auth ni lib/rrhh en runtime (si acaso,
+ * solo lib/rrhh/formatoHorario.ts, que es deliberadamente PURO y no importa
+ * lib/db/store, ver comentario en ese archivo).
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { Rol } from "@/lib/domain/types";
+import type { Empleado, HorarioTurno, Rol } from "@/lib/domain/types";
+import { formatearDinero } from "@/lib/domain/types";
 import { useI18n } from "@/lib/shell/I18nProvider";
 import { textoErrorApi } from "@/lib/i18n/erroresApi";
 import { nombreRolTraducido } from "@/lib/i18n/roles";
 import {
+  agruparHorariosPorEmpleado,
+  domingoDeSemana,
+  formatearResumenHorarioSemana,
+  lunesDeSemanaActual,
+} from "@/lib/rrhh/formatoHorario";
+import {
   cambiarPinUsuario,
   listarRoles,
   listarUsuarios,
-  type UsuarioSinPin,
+  type UsuarioConPinDemo,
 } from "@/components/shell/api";
+import { editarEmpleado, listarEmpleados, listarHorarios } from "@/components/empleados/api";
+import AgregarHorarioModal from "@/components/empleados/AgregarHorarioModal";
 
 export default function GestionarPerfilesModal({ onCerrar }: { onCerrar: () => void }) {
-  const { t } = useI18n();
-  const [usuarios, setUsuarios] = useState<UsuarioSinPin[]>([]);
+  const { t, idioma } = useI18n();
+  const [empleados, setEmpleados] = useState<Empleado[]>([]);
+  const [usuarios, setUsuarios] = useState<UsuarioConPinDemo[]>([]);
   const [roles, setRoles] = useState<Rol[]>([]);
+  const [horariosPorEmpleado, setHorariosPorEmpleado] = useState<Map<string, HorarioTurno[]>>(new Map());
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [cambiandoPinDe, setCambiandoPinDe] = useState<UsuarioSinPin | null>(null);
+
+  const [cambiandoPinDe, setCambiandoPinDe] = useState<UsuarioConPinDemo | null>(null);
+  const [horarioDe, setHorarioDe] = useState<Empleado | null>(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
     setError(null);
     try {
-      const [usuariosData, rolesData] = await Promise.all([listarUsuarios(), listarRoles()]);
+      const lunes = lunesDeSemanaActual();
+      const domingo = domingoDeSemana(lunes);
+      const [empleadosData, usuariosData, rolesData, horariosData] = await Promise.all([
+        listarEmpleados(),
+        listarUsuarios(),
+        listarRoles(),
+        listarHorarios({ desde: lunes, hasta: domingo }),
+      ]);
+      setEmpleados(empleadosData);
       setUsuarios(usuariosData);
       setRoles(rolesData);
+      setHorariosPorEmpleado(agruparHorariosPorEmpleado(horariosData));
     } catch (err) {
       setError(textoErrorApi(err, t, "perfiles.modal.errorCarga"));
     } finally {
@@ -52,9 +82,13 @@ export default function GestionarPerfilesModal({ onCerrar }: { onCerrar: () => v
     return nombreRolTraducido(interno, t);
   }
 
+  function actualizarEmpleadoEnLista(empleado: Empleado) {
+    setEmpleados((prev) => prev.map((e) => (e.id === empleado.id ? empleado : e)));
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl dark:bg-neutral-900">
+      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-2xl bg-white p-6 shadow-xl dark:bg-neutral-900">
         <div className="mb-1 flex items-start justify-between gap-3">
           <h2 className="text-lg font-bold text-ck-dark dark:text-neutral-100">{t("perfiles.modal.titulo")}</h2>
           <button
@@ -75,25 +109,33 @@ export default function GestionarPerfilesModal({ onCerrar }: { onCerrar: () => v
         {cargando ? (
           <p className="text-sm text-neutral-600 dark:text-neutral-400">{t("perfiles.modal.cargando")}</p>
         ) : (
-          <ul className="max-h-80 space-y-2 overflow-y-auto">
-            {usuarios.map((u) => (
-              <li
-                key={u.id}
-                className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 p-3 dark:border-neutral-700"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-ck-dark dark:text-neutral-100">{u.nombre}</p>
-                  <p className="text-xs text-neutral-600 dark:text-neutral-400">{nombreRol(u.rolId)}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setCambiandoPinDe(u)}
-                  className="shrink-0 rounded-lg border border-ck-red px-3 py-1 text-xs font-semibold text-ck-red dark:text-red-400"
-                >
-                  {t("perfiles.modal.cambiarPin")}
-                </button>
+          <ul className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+            {empleados.map((empleado) => {
+              const usuario = empleado.usuarioId
+                ? usuarios.find((u) => u.id === empleado.usuarioId)
+                : undefined;
+              return (
+                <FilaEmpleado
+                  key={empleado.id}
+                  empleado={empleado}
+                  usuario={usuario ?? null}
+                  rolNombre={nombreRol(empleado.rolId)}
+                  horarios={horariosPorEmpleado.get(empleado.id) ?? []}
+                  idioma={idioma}
+                  onCambiarPin={setCambiandoPinDe}
+                  onCambiarHorario={setHorarioDe}
+                  onGuardarTarifa={async (tarifaHoraCentavos) => {
+                    const actualizado = await editarEmpleado(empleado.id, { tarifaHoraCentavos });
+                    actualizarEmpleadoEnLista(actualizado);
+                  }}
+                />
+              );
+            })}
+            {empleados.length === 0 && (
+              <li className="p-6 text-center text-sm text-neutral-500 dark:text-neutral-400">
+                {t("empleados.sinEmpleados")}
               </li>
-            ))}
+            )}
           </ul>
         )}
 
@@ -111,11 +153,163 @@ export default function GestionarPerfilesModal({ onCerrar }: { onCerrar: () => v
       {cambiandoPinDe && (
         <CambiarPinSubmodal
           usuario={cambiandoPinDe}
-          onCambiado={() => setCambiandoPinDe(null)}
+          onCambiado={() => {
+            setCambiandoPinDe(null);
+            cargar();
+          }}
           onCancelar={() => setCambiandoPinDe(null)}
         />
       )}
+
+      {horarioDe && (
+        <AgregarHorarioModal
+          empleado={horarioDe}
+          onCreado={() => {
+            setHorarioDe(null);
+            cargar();
+          }}
+          onCancelar={() => setHorarioDe(null)}
+        />
+      )}
     </div>
+  );
+}
+
+/** Fila de un empleado dentro del panel: horario/PIN/tarifa, cada uno con su propia edicion inline. */
+function FilaEmpleado({
+  empleado,
+  usuario,
+  rolNombre,
+  horarios,
+  idioma,
+  onCambiarPin,
+  onCambiarHorario,
+  onGuardarTarifa,
+}: {
+  empleado: Empleado;
+  usuario: UsuarioConPinDemo | null;
+  rolNombre: string;
+  horarios: HorarioTurno[];
+  idioma: "es" | "en";
+  onCambiarPin: (usuario: UsuarioConPinDemo) => void;
+  onCambiarHorario: (empleado: Empleado) => void;
+  onGuardarTarifa: (tarifaHoraCentavos: number) => Promise<void>;
+}) {
+  const { t } = useI18n();
+  const [tarifaInput, setTarifaInput] = useState(() => (empleado.tarifaHoraCentavos / 100).toFixed(2));
+  const [guardandoTarifa, setGuardandoTarifa] = useState(false);
+  const [errorTarifa, setErrorTarifa] = useState<string | null>(null);
+  const [tarifaOk, setTarifaOk] = useState(false);
+
+  // Un empleado sin Usuario todavia (onboarding no completado) no tiene PIN
+  // que mostrar/cambiar: ver criterio en el pedido de producto.
+  const sinAccesoTodavia = !usuario;
+  const resumenHorario = formatearResumenHorarioSemana(horarios, idioma);
+
+  async function guardarTarifa() {
+    setErrorTarifa(null);
+    const dolares = Number(tarifaInput);
+    if (!Number.isFinite(dolares) || dolares <= 0) {
+      setErrorTarifa(t("empleados.modal.errorTarifaInvalida"));
+      return;
+    }
+    setGuardandoTarifa(true);
+    try {
+      await onGuardarTarifa(Math.round(dolares * 100));
+      setTarifaOk(true);
+      setTimeout(() => setTarifaOk(false), 1500);
+    } catch (err) {
+      setErrorTarifa(textoErrorApi(err, t, "perfiles.modal.errorNoPudoGuardarTarifa"));
+    } finally {
+      setGuardandoTarifa(false);
+    }
+  }
+
+  return (
+    <li className="rounded-xl border border-neutral-200 p-4 dark:border-neutral-700">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-ck-dark dark:text-neutral-100">{empleado.nombre}</p>
+          <p className="text-xs text-neutral-600 dark:text-neutral-400">{rolNombre}</p>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-4 sm:grid-cols-3">
+        {/* Horario asignado */}
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase text-neutral-500 dark:text-neutral-400">
+            {t("perfiles.modal.horarioLabel")}
+          </p>
+          <p className="mt-0.5 text-xs leading-snug text-neutral-700 dark:text-neutral-300">
+            {resumenHorario || t("perfiles.modal.sinHorario")}
+          </p>
+          <button
+            type="button"
+            onClick={() => onCambiarHorario(empleado)}
+            className="mt-2 rounded-lg border border-ck-gold px-2 py-1 text-xs font-semibold text-ck-gold"
+          >
+            {t("perfiles.modal.cambiarHorario")}
+          </button>
+        </div>
+
+        {/* PIN de acceso */}
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase text-neutral-500 dark:text-neutral-400">
+            {t("perfiles.modal.pinLabel")}
+          </p>
+          {sinAccesoTodavia ? (
+            <p className="mt-0.5 text-xs italic text-neutral-500 dark:text-neutral-400">
+              {t("perfiles.modal.pinPendienteOnboarding")}
+            </p>
+          ) : (
+            <>
+              <p className="mt-0.5 font-mono text-sm text-ck-dark dark:text-neutral-100">
+                {t("perfiles.modal.pinActual", { pin: usuario.pinActualDemo })}
+              </p>
+              <button
+                type="button"
+                onClick={() => onCambiarPin(usuario)}
+                className="mt-2 rounded-lg border border-ck-red px-2 py-1 text-xs font-semibold text-ck-red dark:text-red-400"
+              >
+                {t("perfiles.modal.cambiarPin")}
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* Tarifa por hora */}
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase text-neutral-500 dark:text-neutral-400">
+            {t("perfiles.modal.tarifaLabel")}
+          </p>
+          <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+            {t("perfiles.modal.tarifaActualPrefijo", { monto: formatearDinero(empleado.tarifaHoraCentavos) })}
+          </p>
+          <div className="mt-1 flex items-center gap-2">
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={tarifaInput}
+              onChange={(e) => setTarifaInput(e.target.value)}
+              className="w-20 rounded-lg border border-neutral-300 px-2 py-1 text-sm text-ck-dark dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
+            />
+            <button
+              type="button"
+              disabled={guardandoTarifa}
+              onClick={guardarTarifa}
+              className="rounded-lg bg-ck-red px-2 py-1 text-xs font-bold text-white disabled:opacity-50"
+            >
+              {guardandoTarifa ? t("perfiles.modal.guardando") : t("perfiles.modal.guardarTarifa")}
+            </button>
+          </div>
+          {tarifaOk && (
+            <p className="mt-1 text-xs text-green-700 dark:text-green-300">{t("perfiles.modal.tarifaActualizada")}</p>
+          )}
+          {errorTarifa && <p className="mt-1 text-xs text-ck-red dark:text-red-300">{errorTarifa}</p>}
+        </div>
+      </div>
+    </li>
   );
 }
 
@@ -124,7 +318,7 @@ function CambiarPinSubmodal({
   onCambiado,
   onCancelar,
 }: {
-  usuario: UsuarioSinPin;
+  usuario: UsuarioConPinDemo;
   onCambiado: () => void;
   onCancelar: () => void;
 }) {

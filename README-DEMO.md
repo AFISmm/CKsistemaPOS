@@ -240,6 +240,7 @@ disponible en toda la app, con entrada/salida por texto o por voz.
 | **IDs** | UUID v4 (`crypto.randomUUID`). | UUID v7 ordenable (C-ID). |
 | **Eventos en vivo** | Polling HTTP (KDS/CFD). | Bus WebSocket/NATS en LAN (ADR-0003). |
 | **PIN / auth** | Hash de demo (`demo:1234`). | bcrypt/argon2 (S-10). |
+| **SSN (auto-registro de empleado en /login)** | Mismo principio C-PCI que `Pago` (solo token + ultimos4, nunca PAN/CVV) y que la verificacion facial (nunca biometria real): el formulario de auto-registro SOLO captura/envia/almacena `Empleado.ssnUltimos4` (ultimos 4 digitos), enmascarado ya en el cliente y revalidado server-side (`lib/auth/registro.ts`) para rechazar cualquier valor que no sean EXACTAMENTE 4 digitos. El SSN completo NUNCA viaja al servidor ni se guarda en ningun lado — necesario porque esta demo se despliega publicamente en internet (Vercel) sin autenticacion real de servidor. | Un dato real de SSN completo en produccion requeriria cifrado en reposo, control de acceso estricto (least privilege) y cumplimiento normativo (ej. cifrado a nivel de campo, tokenizacion via un proveedor especializado, auditoria de acceso); aqui se opta por minimizar el dato desde el origen en vez de resolver ese cumplimiento en la demo. |
 
 ## Disposicion de archivos (contrato de integracion)
 

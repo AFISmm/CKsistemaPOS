@@ -126,6 +126,9 @@ export function getSeedRrhh(): SeedRrhh {
     tarifaHoraCentavos: 1500, // $15.00/hr DEMO
     usuarioId: "user-cajero-demo",
     motivoBaja: null,
+    // Empleados semilla: dato anterior a esta feature, no aplica (ver
+    // comentario de privacidad en lib/domain/types.ts Empleado.ssnUltimos4).
+    ssnUltimos4: null,
     creadoEn: "2024-03-15T09:00:00.000Z",
   };
 
@@ -141,6 +144,9 @@ export function getSeedRrhh(): SeedRrhh {
     tarifaHoraCentavos: 2200, // $22.00/hr DEMO
     usuarioId: "user-gerente-demo",
     motivoBaja: null,
+    // Empleados semilla: dato anterior a esta feature, no aplica (ver
+    // comentario de privacidad en lib/domain/types.ts Empleado.ssnUltimos4).
+    ssnUltimos4: null,
     creadoEn: "2022-11-01T09:00:00.000Z",
   };
 
@@ -156,6 +162,9 @@ export function getSeedRrhh(): SeedRrhh {
     tarifaHoraCentavos: 1600, // $16.00/hr DEMO
     usuarioId: "user-cocina-demo",
     motivoBaja: null,
+    // Empleados semilla: dato anterior a esta feature, no aplica (ver
+    // comentario de privacidad en lib/domain/types.ts Empleado.ssnUltimos4).
+    ssnUltimos4: null,
     creadoEn: "2023-06-20T09:00:00.000Z",
   };
 
@@ -171,6 +180,9 @@ export function getSeedRrhh(): SeedRrhh {
     tarifaHoraCentavos: 1450, // $14.50/hr DEMO
     usuarioId: "user-cajero-tx-demo",
     motivoBaja: null,
+    // Empleados semilla: dato anterior a esta feature, no aplica (ver
+    // comentario de privacidad en lib/domain/types.ts Empleado.ssnUltimos4).
+    ssnUltimos4: null,
     creadoEn: "2023-09-05T09:00:00.000Z",
   };
 
@@ -186,6 +198,9 @@ export function getSeedRrhh(): SeedRrhh {
     tarifaHoraCentavos: 1550, // $15.50/hr DEMO
     usuarioId: "user-cocina-tx-demo",
     motivoBaja: null,
+    // Empleados semilla: dato anterior a esta feature, no aplica (ver
+    // comentario de privacidad en lib/domain/types.ts Empleado.ssnUltimos4).
+    ssnUltimos4: null,
     creadoEn: "2024-01-10T09:00:00.000Z",
   };
 
@@ -202,6 +217,9 @@ export function getSeedRrhh(): SeedRrhh {
     tarifaHoraCentavos: 1400, // $14.00/hr DEMO
     usuarioId: null,
     motivoBaja: null,
+    // Empleados semilla: dato anterior a esta feature, no aplica (ver
+    // comentario de privacidad en lib/domain/types.ts Empleado.ssnUltimos4).
+    ssnUltimos4: null,
     creadoEn: hoy.toISOString(),
   };
 

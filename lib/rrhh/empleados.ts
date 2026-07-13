@@ -20,6 +20,14 @@ export interface NuevoEmpleadoInput {
   rolId: string;
   fechaContratacion?: string; // ISO date; default hoy
   tarifaHoraCentavos: number;
+  /**
+   * Opcional: SOLO los ultimos 4 digitos del SSN (ver comentario de
+   * privacidad en Empleado.ssnUltimos4, lib/domain/types.ts). Si se provee,
+   * se valida aqui tambien (defensa en profundidad) aunque el llamador
+   * principal (lib/auth/registro.ts, auto-registro desde /login) ya valida
+   * server-side antes de llegar aqui.
+   */
+  ssnUltimos4?: string | null;
 }
 
 function validarRol(rolId: string): void {
@@ -57,6 +65,13 @@ export function crearEmpleado(input: NuevoEmpleadoInput): Empleado {
       422
     );
   }
+  if (input.ssnUltimos4 != null && !/^\d{4}$/.test(input.ssnUltimos4)) {
+    throw new ErrorRrhh(
+      "ssn_invalido",
+      "ssnUltimos4 debe ser exactamente 4 digitos numericos (nunca el SSN completo)",
+      422
+    );
+  }
 
   const ubicacionId = input.ubicacionId ?? UBICACION_PILOTO_ID;
   validarUbicacion(ubicacionId);
@@ -74,6 +89,7 @@ export function crearEmpleado(input: NuevoEmpleadoInput): Empleado {
     tarifaHoraCentavos: input.tarifaHoraCentavos,
     usuarioId: null,
     motivoBaja: null,
+    ssnUltimos4: input.ssnUltimos4 ?? null,
     creadoEn: ahora(),
   };
 
@@ -105,6 +121,19 @@ export function listarEmpleados(filtro: { ubicacionId?: string; estado?: EstadoE
 
 export function obtenerEmpleado(empleadoId: string): Empleado | undefined {
   return getDb().empleados.find((e) => e.id === empleadoId);
+}
+
+/**
+ * Busca un Empleado por email (comparacion case-insensitive, con trim).
+ * Reutilizado por el flujo de auto-registro/login por correo (lib/auth/*):
+ * ver GET /api/v1/auth/verificar-correo, POST /api/v1/auth/registrar y
+ * POST /api/v1/auth/login. No expone el Empleado completo a esos endpoints
+ * salvo lo minimo que ellos mismos decidan devolver.
+ */
+export function obtenerEmpleadoPorEmail(email: string): Empleado | undefined {
+  const normalizado = (email ?? "").trim().toLowerCase();
+  if (!normalizado) return undefined;
+  return getDb().empleados.find((e) => e.email.trim().toLowerCase() === normalizado);
 }
 
 function obtenerEmpleadoOrThrow(empleadoId: string): Empleado {

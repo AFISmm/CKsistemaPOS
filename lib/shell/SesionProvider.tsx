@@ -37,7 +37,7 @@ interface SesionContextValue {
   usuarioActual: UsuarioActual | null;
   /** true mientras se resuelve la sesion guardada (evita parpadeos/redirects prematuros). */
   cargando: boolean;
-  login: (pin: string) => Promise<void>;
+  login: (email: string, pin: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -84,8 +84,8 @@ export function SesionProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  async function login(pin: string): Promise<void> {
-    const { usuario, rol } = await iniciarSesionPin(pin);
+  async function login(email: string, pin: string): Promise<void> {
+    const { usuario, rol } = await iniciarSesionPin(email, pin);
     setUsuarioActual({ ...usuario, rol });
     try {
       window.localStorage.setItem(CLAVE_STORAGE, usuario.id);

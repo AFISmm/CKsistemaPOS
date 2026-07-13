@@ -2,13 +2,20 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import type { Empleado, Marcaje, Rol, Ubicacion } from "@/lib/domain/types";
+import type { Empleado, HorarioTurno, Marcaje, Rol, Ubicacion } from "@/lib/domain/types";
 import { formatearDinero } from "@/lib/domain/types";
 import { useI18n } from "@/lib/shell/I18nProvider";
 import { textoErrorApi } from "@/lib/i18n/erroresApi";
 import { nombreRolTraducido } from "@/lib/i18n/roles";
 import {
+  agruparHorariosPorEmpleado,
+  domingoDeSemana,
+  formatearResumenHorarioSemana,
+  lunesDeSemanaActual,
+} from "@/lib/rrhh/formatoHorario";
+import {
   listarEmpleados,
+  listarHorarios,
   listarMarcajes,
   listarRoles,
   listarUbicaciones,
@@ -54,6 +61,7 @@ export default function EmpleadosPage() {
   const [roles, setRoles] = useState<Rol[]>([]);
   const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([]);
   const [ultimosMarcajes, setUltimosMarcajes] = useState<Map<string, UltimoMarcajePorTipo>>(new Map());
+  const [horariosPorEmpleado, setHorariosPorEmpleado] = useState<Map<string, HorarioTurno[]>>(new Map());
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,16 +74,20 @@ export default function EmpleadosPage() {
     setCargando(true);
     setError(null);
     try {
-      const [emps, rolesData, ubicacionesData, marcajes] = await Promise.all([
+      const lunes = lunesDeSemanaActual();
+      const domingo = domingoDeSemana(lunes);
+      const [emps, rolesData, ubicacionesData, marcajes, horarios] = await Promise.all([
         listarEmpleados(),
         listarRoles(),
         listarUbicaciones(),
         listarMarcajes({}),
+        listarHorarios({ desde: lunes, hasta: domingo }),
       ]);
       setEmpleados(emps);
       setRoles(rolesData);
       setUbicaciones(ubicacionesData);
       setUltimosMarcajes(ultimoMarcajePorEmpleado(marcajes));
+      setHorariosPorEmpleado(agruparHorariosPorEmpleado(horarios));
     } catch (err) {
       setError(textoErrorApi(err, t, "empleados.errorCarga"));
     } finally {
@@ -156,6 +168,7 @@ export default function EmpleadosPage() {
                   <th className="p-3">{t("empleados.colRol")}</th>
                   <th className="p-3">{t("empleados.colTienda")}</th>
                   <th className="p-3">{t("empleados.colTarifa")}</th>
+                  <th className="p-3">{t("empleados.colHorario")}</th>
                   <th className="p-3">{t("empleados.colEstado")}</th>
                   <th className="p-3">{t("empleados.colCheckIn")}</th>
                   <th className="p-3">{t("empleados.colCheckOut")}</th>
@@ -176,6 +189,10 @@ export default function EmpleadosPage() {
                     <td className="p-3">{nombreRol(e.rolId)}</td>
                     <td className="p-3">{codigoUbicacion(e.ubicacionId)}</td>
                     <td className="p-3">{formatearDinero(e.tarifaHoraCentavos)}/hr</td>
+                    <td className="p-3 text-xs text-neutral-600 dark:text-neutral-400">
+                      {formatearResumenHorarioSemana(horariosPorEmpleado.get(e.id) ?? [], idioma) ||
+                        t("empleados.sinHorario")}
+                    </td>
                     <td className="p-3">
                       <EstadoBadge estado={e.estado} />
                     </td>
@@ -217,7 +234,7 @@ export default function EmpleadosPage() {
                 })}
                 {empleados.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="p-6 text-center text-neutral-500 dark:text-neutral-400">
+                    <td colSpan={9} className="p-6 text-center text-neutral-500 dark:text-neutral-400">
                       {t("empleados.sinEmpleados")}
                     </td>
                   </tr>

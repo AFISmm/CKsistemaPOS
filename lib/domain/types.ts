@@ -89,6 +89,23 @@ export interface Empleado {
   usuarioId: string | null;
   /** Motivo de baja (solo si estado === "inactivo"). */
   motivoBaja: string | null;
+  /**
+   * AGREGADO EN ETAPA 1 (auto-registro desde /login): SOLO los ULTIMOS 4
+   * digitos del SSN (Social Security Number), NUNCA el numero completo.
+   * Mismo principio que C-PCI en `Pago` (solo token + ultimos4, nunca
+   * PAN/CVV) y que la verificacion facial simulada de `Marcaje` (nunca datos
+   * biometricos reales): esta demo se despliega publicamente en internet
+   * (Vercel) sin autenticacion real de servidor, asi que el dato sensible se
+   * minimiza DESDE EL ORIGEN — el cliente nunca envia ni el servidor nunca
+   * almacena el SSN completo (ver app/api/v1/auth/registrar/route.ts y
+   * lib/auth/registro.ts, que rechazan cualquier valor que no sean EXACTAMENTE
+   * 4 digitos). `null` = no aplica (empleados semilla existentes, o
+   * empleados dados de alta manualmente por un gerente sin este dato).
+   * Produccion: dato real de SSN completo requeriria cifrado en reposo,
+   * control de acceso estricto (least privilege) y cumplimiento normativo
+   * (ver nota de cumplimiento en README-DEMO.md).
+   */
+  ssnUltimos4: string | null;
   creadoEn: string;
 }
 

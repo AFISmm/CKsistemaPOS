@@ -7,7 +7,7 @@
  * cliente). Tipos de dominio importados con `import type`.
  */
 
-import type { Notificacion, Rol, Usuario } from "@/lib/domain/types";
+import type { Empleado, Notificacion, Rol, Usuario } from "@/lib/domain/types";
 
 const BASE_URL = "/api/v1";
 
@@ -64,13 +64,52 @@ async function solicitar<T>(ruta: string, init?: RequestInit): Promise<T> {
 /** Usuario sin el campo `pinHash` (nunca se expone al cliente). */
 export type UsuarioSinPin = Omit<Usuario, "pinHash">;
 
+/**
+ * Usuario (sin pinHash) + `pinActualDemo` (PIN en texto plano). SOLO valido
+ * en esta demo: `pinActualDemo` viene de quitarle el prefijo `"demo:"` a
+ * `Usuario.pinHash`, que aqui NUNCA fue un hash criptografico real (ver la
+ * nota de cumplimiento completa en lib/auth/autenticacion.ts, funcion
+ * `listarUsuarios`). Este tipo/dato es EXCLUSIVO del panel "Gestionar
+ * perfiles" (a pedido de producto) y jamas deberia existir en un backend de
+ * produccion con hash real (bcrypt/argon2): un hash real no es reversible.
+ */
+export type UsuarioConPinDemo = UsuarioSinPin & { pinActualDemo: string };
+
 export async function iniciarSesionPin(
+  email: string,
   pin: string
 ): Promise<{ usuario: UsuarioSinPin; rol: Rol }> {
   return solicitar("/auth/login", {
     method: "POST",
-    body: JSON.stringify({ pin }),
+    body: JSON.stringify({ email, pin }),
   });
+}
+
+/** Paso 1 de /login: resuelve si el correo ya es un Empleado y si ya tiene PIN habilitado. */
+export interface VerificarCorreoResponse {
+  registrado: boolean;
+  pinHabilitado: boolean;
+}
+
+export async function verificarCorreo(email: string): Promise<VerificarCorreoResponse> {
+  return solicitar(`/auth/verificar-correo?email=${encodeURIComponent(email)}`);
+}
+
+/** Paso 2b de /login (correo no registrado): auto-registro, crea Empleado en "onboarding". */
+export interface RegistroInput {
+  nombre: string;
+  apellido: string;
+  ssnUltimos4: string;
+  email: string;
+  telefono: string;
+}
+
+export async function registrarEmpleado(input: RegistroInput): Promise<Empleado> {
+  const { empleado } = await solicitar<{ empleado: Empleado }>("/auth/registrar", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return empleado;
 }
 
 export async function obtenerSesionActual(
@@ -100,9 +139,13 @@ export async function listarRoles(): Promise<Rol[]> {
   return roles;
 }
 
-/** Lista de Usuario (sin pinHash) para el modal "Gestionar perfiles" del sidebar (permiso "usuarios.gestionar"). */
-export async function listarUsuarios(): Promise<UsuarioSinPin[]> {
-  const { usuarios } = await solicitar<{ usuarios: UsuarioSinPin[] }>("/auth/usuarios");
+/**
+ * Lista de Usuario (sin pinHash, mas `pinActualDemo` SOLO por el formato de
+ * almacenamiento demo, ver UsuarioConPinDemo arriba) para el panel
+ * "Gestionar perfiles" del sidebar (permiso "usuarios.gestionar").
+ */
+export async function listarUsuarios(): Promise<UsuarioConPinDemo[]> {
+  const { usuarios } = await solicitar<{ usuarios: UsuarioConPinDemo[] }>("/auth/usuarios");
   return usuarios;
 }
 
