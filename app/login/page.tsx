@@ -56,6 +56,9 @@ const CAMPOS_REGISTRO_VACIO = {
   ssnUltimos4: "",
   telefonoNumero: "",
   email: "",
+  // Solo aplica a cuentas @digeniusai.com: eligen su propio PIN al registrarse
+  // (no hay gerente que se los asigne despues, ver lib/auth/registro.ts).
+  pinDeveloper: "",
 };
 
 export default function LoginPage() {
@@ -142,6 +145,7 @@ export default function LoginPage() {
     if (enviando) return;
     setEnviando(true);
     setError(null);
+    const emailRegistro = registro.email.trim();
     try {
       await registrarEmpleado({
         nombre: registro.nombre.trim(),
@@ -149,18 +153,30 @@ export default function LoginPage() {
         // Correos @digeniusai.com (desarrolladores) no requieren SSN, ver
         // lib/auth/registro.ts (misma regla validada de nuevo server-side).
         ssnUltimos4: registroEsDeveloper ? null : registro.ssnUltimos4.trim(),
-        email: registro.email.trim(),
+        email: emailRegistro,
         // Indicativo del pais elegido en el selector + numero nacional, ej.
         // "+1 3055550100". `telefono` sigue siendo un solo string en el
         // backend (sin cambio de esquema), solo se compone aqui.
         telefono: `${indicativoSeleccionado} ${registro.telefonoNumero.trim()}`.trim(),
+        // Solo importa (y se valida) para cuentas @digeniusai.com.
+        pin: registroEsDeveloper ? registro.pinDeveloper.trim() : null,
       });
+      if (registroEsDeveloper) {
+        // Las cuentas developer quedan activas de inmediato (sin aprobacion
+        // de gerente): entran directo al portal con el PIN que acaban de
+        // elegir, en vez de ver el mensaje de "pendiente".
+        await login(emailRegistro, registro.pinDeveloper.trim());
+        router.replace("/");
+        return;
+      }
       setRegistroExitoso(true);
     } catch (err) {
       if (err instanceof ErrorApi && err.status === 409) {
         setError(t("login.registro.errorCorreoRegistrado"));
       } else if (err instanceof ErrorApi && err.status === 422) {
-        setError(t("login.registro.errorSsn"));
+        setError(
+          registroEsDeveloper ? t("login.registro.errorPin") : t("login.registro.errorSsn")
+        );
       } else {
         setError(t("login.registro.errorGenerico"));
       }
@@ -174,7 +190,9 @@ export default function LoginPage() {
     registro.apellido.trim() &&
     registro.telefonoNumero.trim() &&
     registro.email.trim() &&
-    (registroEsDeveloper || registro.ssnUltimos4.length === 4);
+    (registroEsDeveloper
+      ? /^\d{4,6}$/.test(registro.pinDeveloper.trim())
+      : registro.ssnUltimos4.length === 4);
 
   return (
     <main className="grid min-h-screen place-items-center bg-ck-cream p-4 dark:bg-neutral-950">
@@ -371,9 +389,32 @@ export default function LoginPage() {
               </label>
 
               {registroEsDeveloper ? (
-                <p className="rounded-lg border border-ck-gold/40 bg-ck-gold/10 p-2 text-[11px] leading-snug text-ck-dark dark:text-neutral-300">
-                  {t("login.registro.ssnOmitidoDeveloper")}
-                </p>
+                <>
+                  <p className="rounded-lg border border-ck-gold/40 bg-ck-gold/10 p-2 text-[11px] leading-snug text-ck-dark dark:text-neutral-300">
+                    {t("login.registro.ssnOmitidoDeveloper")}
+                  </p>
+                  <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400">
+                    {t("login.registro.campoPinDeveloper")}
+                    <input
+                      required
+                      inputMode="numeric"
+                      minLength={4}
+                      maxLength={6}
+                      placeholder="1234"
+                      value={registro.pinDeveloper}
+                      onChange={(e) =>
+                        setRegistro((r) => ({
+                          ...r,
+                          pinDeveloper: e.target.value.replace(/\D/g, "").slice(0, 6),
+                        }))
+                      }
+                      className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm tracking-widest text-ck-dark dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
+                    />
+                    <span className="mt-1 block text-[11px] font-normal normal-case text-neutral-400 dark:text-neutral-500">
+                      {t("login.registro.pinDeveloperAyuda")}
+                    </span>
+                  </label>
+                </>
               ) : (
                 <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400">
                   {t("login.registro.campoSsn")}
@@ -412,7 +453,11 @@ export default function LoginPage() {
                 disabled={enviando || !registroValido}
                 className="min-h-[44px] w-full rounded-xl bg-ck-red py-3 text-sm font-bold text-white disabled:opacity-50 active:scale-95"
               >
-                {enviando ? t("login.registro.enviando") : t("login.registro.enviar")}
+                {enviando
+                  ? t("login.registro.enviando")
+                  : registroEsDeveloper
+                    ? t("login.registro.enviarDeveloper")
+                    : t("login.registro.enviar")}
               </button>
             </form>
           </>

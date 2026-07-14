@@ -19,6 +19,7 @@ export async function POST(request: Request) {
       ssnUltimos4: body.ssnUltimos4 ?? "",
       email: body.email ?? "",
       telefono: body.telefono ?? "",
+      pin: body.pin ?? "",
     });
     return Response.json({ empleado }, { status: 201 });
   } catch (e) {

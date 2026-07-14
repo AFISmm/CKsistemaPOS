@@ -177,6 +177,40 @@ function sembrar(db: Db): void {
   );
 
   // Roles (RBAC MVP)
+  // Lista completa de permisos otorgados a gerente de tienda Y a developer
+  // (ver rol-developer abajo): se centraliza en una constante para que ambos
+  // roles queden sincronizados sin duplicar el array literal.
+  const PERMISOS_GERENCIALES = [
+    "pedido.crear",
+    "pedido.cobrar",
+    "pedido.descuento.autorizar",
+    "pago.reembolso",
+    "inventario.ajustar",
+    "turno.cierreZ",
+    "producto.marcar86",
+    // ---- Permisos agregados por el shell de UI (etapa 1) ----
+    // No existia un permiso RBAC natural para "ver reportes", "gestionar
+    // personal" o "ver nomina" en el MVP de backend-ventas/rrhh-personal;
+    // se agregan aqui, otorgados a gerente de tienda y developer, porque esas
+    // pantallas son informacion/operacion gerencial (ver decision
+    // documentada en lib/navigation/modulos.ts).
+    "reportes.ver",
+    "empleados.gestionar",
+    "nomina.ver",
+    // El gerente de tienda (y developer) tambien deben poder ver la pantalla
+    // de cocina (supervisan todo el local): sin este permiso, el sidebar no
+    // mostraba "Pantalla de Cocina" (unico permiso sembrado para /kds es
+    // "cocina.actualizarEstado", ver rol-cocina arriba).
+    "cocina.actualizarEstado",
+    // Permiso para el boton "Gestionar perfiles" del sidebar (shell de UI):
+    // lista de Usuario + cambio de PIN. No existia un permiso RBAC natural
+    // para "administrar cuentas de acceso"; se otorga a gerente de tienda y
+    // developer porque cambiar el PIN de otro usuario es una operacion de
+    // seguridad/gerencial, no de mostrador ni cocina. Ver
+    // components/shell/Sidebar.tsx y components/shell/GestionarPerfilesModal.tsx.
+    "usuarios.gestionar",
+  ];
+
   db.roles.push(
     {
       id: "rol-cajero",
@@ -191,37 +225,21 @@ function sembrar(db: Db): void {
     {
       id: "rol-gerente",
       nombre: "gerenteTienda",
-      permisos: [
-        "pedido.crear",
-        "pedido.cobrar",
-        "pedido.descuento.autorizar",
-        "pago.reembolso",
-        "inventario.ajustar",
-        "turno.cierreZ",
-        "producto.marcar86",
-        // ---- Permisos agregados por el shell de UI (etapa 1) ----
-        // No existia un permiso RBAC natural para "ver reportes", "gestionar
-        // personal" o "ver nomina" en el MVP de backend-ventas/rrhh-personal;
-        // se agregan aqui, otorgados SOLO a gerente de tienda, porque esas
-        // pantallas son informacion/operacion gerencial (ver decision
-        // documentada en lib/navigation/modulos.ts).
-        "reportes.ver",
-        "empleados.gestionar",
-        "nomina.ver",
-        // El gerente de tienda tambien debe poder ver la pantalla de cocina
-        // (supervisa todo el local): sin este permiso, el sidebar del
-        // gerente no mostraba "Pantalla de Cocina" (unico permiso sembrado
-        // para /kds es "cocina.actualizarEstado", ver rol-cocina arriba).
-        "cocina.actualizarEstado",
-        // Permiso nuevo para el boton "Gestionar perfiles" del sidebar
-        // (shell de UI): lista de Usuario + cambio de PIN. No existia un
-        // permiso RBAC natural para "administrar cuentas de acceso"; se
-        // otorga SOLO a gerente de tienda porque cambiar el PIN de otro
-        // usuario es una operacion de seguridad/gerencial, no de mostrador
-        // ni cocina. Ver components/shell/Sidebar.tsx y
-        // components/shell/GestionarPerfilesModal.tsx.
-        "usuarios.gestionar",
-      ],
+      permisos: PERMISOS_GERENCIALES,
+    },
+    {
+      // Cuenta de desarrolladores/staff de Digenius (correos @digeniusai.com,
+      // ver DOMINIO_DEVELOPERS en lib/auth/registro.ts). A pedido del dueno
+      // de producto: estos correos no pasan por aprobacion de un gerente
+      // (se auto-activan al registrarse, ver registrarEmpleado) y tienen
+      // acceso TOTAL al portal — son quienes otorgan permisos a los demas
+      // empleados (via Gestionar Perfiles/Completar onboarding) y cargan la
+      // informacion operativa. Mismos permisos que gerente de tienda hoy
+      // (es el techo de acceso ya modelado en este MVP); si se agregan
+      // permisos nuevos en el futuro, deberian otorgarse aqui tambien.
+      id: "rol-developer",
+      nombre: "developer",
+      permisos: PERMISOS_GERENCIALES,
     }
   );
 

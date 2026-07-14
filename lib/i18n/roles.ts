@@ -11,6 +11,7 @@ const CLAVE_POR_ROL: Record<string, string> = {
   cajero: "roles.cajero",
   cocina: "roles.cocina",
   gerenteTienda: "roles.gerente",
+  developer: "roles.developer",
 };
 
 export function nombreRolTraducido(nombreInterno: string, t: Traductor): string {

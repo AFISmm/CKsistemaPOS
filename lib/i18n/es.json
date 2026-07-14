@@ -439,5 +439,10 @@
   "login.subtituloRegistro": "Completa tus datos. Un gerente debe asignarte un PIN antes de que puedas iniciar sesión.",
   "login.errorNoRegistrado": "No encontramos una cuenta con ese correo. Usa \"Registrarse\" para solicitar acceso.",
   "login.registro.ssnOmitidoDeveloper": "Las cuentas de desarrolladores de Digenius (@digeniusai.com) no necesitan SSN.",
-  "login.registro.campoPais": "Indicativo de pais"
+  "login.registro.campoPais": "Indicativo de pais",
+  "roles.developer": "Desarrollador",
+  "login.registro.campoPinDeveloper": "Elige un PIN (4 a 6 digitos)",
+  "login.registro.pinDeveloperAyuda": "Las cuentas de desarrollador se activan de inmediato con el PIN que elijas aqui, sin necesidad de aprobacion de un gerente.",
+  "login.registro.enviarDeveloper": "Crear cuenta e iniciar sesion",
+  "login.registro.errorPin": "Ingresa un PIN de entre 4 y 6 digitos."
 }

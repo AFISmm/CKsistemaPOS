@@ -439,5 +439,10 @@
   "login.subtituloRegistro": "Fill in your information below. A manager will need to assign you a PIN before you can sign in.",
   "login.errorNoRegistrado": "We could not find an account for that email. Use \"Register\" to request access.",
   "login.registro.ssnOmitidoDeveloper": "Digenius developer accounts (@digeniusai.com) do not need an SSN.",
-  "login.registro.campoPais": "Country code"
+  "login.registro.campoPais": "Country code",
+  "roles.developer": "Developer",
+  "login.registro.campoPinDeveloper": "Choose a PIN (4-6 digits)",
+  "login.registro.pinDeveloperAyuda": "Developer accounts activate immediately with the PIN you choose here — no manager approval needed.",
+  "login.registro.enviarDeveloper": "Create account & sign in",
+  "login.registro.errorPin": "Enter a PIN between 4 and 6 digits."
 }
