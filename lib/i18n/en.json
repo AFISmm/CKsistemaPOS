@@ -438,5 +438,6 @@
   "login.subtituloIniciarSesion": "Enter your email and PIN to sign in.",
   "login.subtituloRegistro": "Fill in your information below. A manager will need to assign you a PIN before you can sign in.",
   "login.errorNoRegistrado": "We could not find an account for that email. Use \"Register\" to request access.",
-  "login.registro.ssnOmitidoDeveloper": "Digenius developer accounts (@digeniusai.com) do not need an SSN."
+  "login.registro.ssnOmitidoDeveloper": "Digenius developer accounts (@digeniusai.com) do not need an SSN.",
+  "login.registro.campoPais": "Country code"
 }

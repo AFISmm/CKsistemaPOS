@@ -438,5 +438,6 @@
   "login.subtituloIniciarSesion": "Ingresa tu correo y tu PIN para iniciar sesión.",
   "login.subtituloRegistro": "Completa tus datos. Un gerente debe asignarte un PIN antes de que puedas iniciar sesión.",
   "login.errorNoRegistrado": "No encontramos una cuenta con ese correo. Usa \"Registrarse\" para solicitar acceso.",
-  "login.registro.ssnOmitidoDeveloper": "Las cuentas de desarrolladores de Digenius (@digeniusai.com) no necesitan SSN."
+  "login.registro.ssnOmitidoDeveloper": "Las cuentas de desarrolladores de Digenius (@digeniusai.com) no necesitan SSN.",
+  "login.registro.campoPais": "Indicativo de pais"
 }

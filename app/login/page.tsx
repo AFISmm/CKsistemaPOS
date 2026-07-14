@@ -35,6 +35,7 @@ import { useI18n } from "@/lib/shell/I18nProvider";
 import { ErrorApi, registrarEmpleado, verificarCorreo } from "@/components/shell/api";
 import SelectorIdioma from "@/components/shell/SelectorIdioma";
 import ToggleTema from "@/components/shell/ToggleTema";
+import { PAISES, banderaDesdeCodigoPais } from "@/lib/data/paises";
 
 const LONGITUD_PIN = 4;
 const DIGITOS_FILA_1 = ["1", "2", "3"];
@@ -44,9 +45,18 @@ const DIGITOS_FILA_3 = ["7", "8", "9"];
 /** Dominio de correo de desarrolladores/staff de Digenius: no requieren SSN. */
 const DOMINIO_DEVELOPERS = /@digeniusai\.com$/i;
 
+/** Tienda piloto (Miami/Austin) -> Estados Unidos como default razonable del selector. */
+const PAIS_TELEFONO_DEFAULT = "US";
+
 type Modo = "login" | "registro";
 
-const CAMPOS_REGISTRO_VACIO = { nombre: "", apellido: "", ssnUltimos4: "", telefono: "", email: "" };
+const CAMPOS_REGISTRO_VACIO = {
+  nombre: "",
+  apellido: "",
+  ssnUltimos4: "",
+  telefonoNumero: "",
+  email: "",
+};
 
 export default function LoginPage() {
   const router = useRouter();
@@ -61,6 +71,7 @@ export default function LoginPage() {
 
   // --- Registrarse ---
   const [registro, setRegistro] = useState(CAMPOS_REGISTRO_VACIO);
+  const [paisTelefono, setPaisTelefono] = useState(PAIS_TELEFONO_DEFAULT);
   const [registroExitoso, setRegistroExitoso] = useState(false);
 
   const [enviando, setEnviando] = useState(false);
@@ -123,6 +134,8 @@ export default function LoginPage() {
   }
 
   const registroEsDeveloper = DOMINIO_DEVELOPERS.test(registro.email.trim());
+  const indicativoSeleccionado =
+    PAISES.find((p) => p.codigo === paisTelefono)?.indicativo ?? "+1";
 
   async function manejarSubmitRegistro(e: FormEvent) {
     e.preventDefault();
@@ -137,7 +150,10 @@ export default function LoginPage() {
         // lib/auth/registro.ts (misma regla validada de nuevo server-side).
         ssnUltimos4: registroEsDeveloper ? null : registro.ssnUltimos4.trim(),
         email: registro.email.trim(),
-        telefono: registro.telefono.trim(),
+        // Indicativo del pais elegido en el selector + numero nacional, ej.
+        // "+1 3055550100". `telefono` sigue siendo un solo string en el
+        // backend (sin cambio de esquema), solo se compone aqui.
+        telefono: `${indicativoSeleccionado} ${registro.telefonoNumero.trim()}`.trim(),
       });
       setRegistroExitoso(true);
     } catch (err) {
@@ -156,7 +172,7 @@ export default function LoginPage() {
   const registroValido =
     registro.nombre.trim() &&
     registro.apellido.trim() &&
-    registro.telefono.trim() &&
+    registro.telefonoNumero.trim() &&
     registro.email.trim() &&
     (registroEsDeveloper || registro.ssnUltimos4.length === 4);
 
@@ -327,14 +343,31 @@ export default function LoginPage() {
 
               <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400">
                 {t("login.registro.campoTelefono")}
-                <input
-                  required
-                  type="tel"
-                  autoComplete="tel"
-                  value={registro.telefono}
-                  onChange={(e) => setRegistro((r) => ({ ...r, telefono: e.target.value }))}
-                  className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm text-ck-dark dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
-                />
+                <div className="mt-1 flex gap-2">
+                  <select
+                    aria-label={t("login.registro.campoPais")}
+                    value={paisTelefono}
+                    onChange={(e) => setPaisTelefono(e.target.value)}
+                    className="w-28 shrink-0 rounded-xl border border-neutral-300 bg-white px-2 py-2 text-sm text-ck-dark dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
+                  >
+                    {PAISES.map((p) => (
+                      <option key={p.codigo} value={p.codigo}>
+                        {banderaDesdeCodigoPais(p.codigo)} {p.indicativo}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    required
+                    type="tel"
+                    autoComplete="tel-national"
+                    inputMode="tel"
+                    value={registro.telefonoNumero}
+                    onChange={(e) =>
+                      setRegistro((r) => ({ ...r, telefonoNumero: e.target.value }))
+                    }
+                    className="min-w-0 flex-1 rounded-xl border border-neutral-300 px-3 py-2 text-sm text-ck-dark dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
+                  />
+                </div>
               </label>
 
               {registroEsDeveloper ? (
