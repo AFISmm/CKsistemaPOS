@@ -432,5 +432,11 @@
   "empleados.modal.horarioCreado": "Schedule saved.",
   "empleados.modal.overtimeTitulo": "Overtime warning",
   "empleados.modal.overtimeMensaje": "This will give {{nombre}} more than 40 hours this week ({{horas}} hours total). Hours after 40 will be paid as overtime. Do you want to authorize it anyway?",
-  "empleados.modal.overtimeAutorizar": "Authorize and save"
+  "empleados.modal.overtimeAutorizar": "Authorize and save",
+  "login.tabIniciarSesion": "Sign in",
+  "login.tabRegistrarse": "Register",
+  "login.subtituloIniciarSesion": "Enter your email and PIN to sign in.",
+  "login.subtituloRegistro": "Fill in your information below. A manager will need to assign you a PIN before you can sign in.",
+  "login.errorNoRegistrado": "We could not find an account for that email. Use \"Register\" to request access.",
+  "login.registro.ssnOmitidoDeveloper": "Digenius developer accounts (@digeniusai.com) do not need an SSN."
 }

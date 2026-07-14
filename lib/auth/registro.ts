@@ -31,11 +31,23 @@ const ROL_DEFAULT_AUTOREGISTRO = "rol-cajero";
 // $14.00/hr DEMO — el gerente lo ajusta despues desde Empleados/Gestionar Perfiles.
 const TARIFA_DEFAULT_CENTAVOS = 1400;
 
+/** Dominio de correo interno de Digenius (desarrolladores/staff tecnico del proyecto). */
+const DOMINIO_DEVELOPERS = "@digeniusai.com";
+
+/** true si el correo pertenece al dominio de desarrolladores (sin distinguir mayusculas). */
+function esCorreoDeDeveloper(email: string): boolean {
+  return email.toLowerCase().endsWith(DOMINIO_DEVELOPERS);
+}
+
 export interface RegistroInput {
   nombre: string;
   apellido: string;
-  /** SOLO los ultimos 4 digitos del SSN (nunca el numero completo). */
-  ssnUltimos4: string;
+  /**
+   * SOLO los ultimos 4 digitos del SSN (nunca el numero completo). Opcional:
+   * los correos @digeniusai.com (desarrolladores) NO requieren SSN, ver
+   * `esCorreoDeDeveloper` abajo.
+   */
+  ssnUltimos4?: string | null;
   email: string;
   telefono: string;
 }
@@ -60,12 +72,26 @@ export function registrarEmpleado(input: RegistroInput): Empleado {
   if (!telefono) {
     throw new ErrorAuth("telefono_requerido", "El telefono es requerido.", 422);
   }
-  // Server-side: rechaza cualquier cosa que no sean EXACTAMENTE 4 digitos
-  // (ej. un SSN completo de 9 digitos), sin confiar solo en el cliente.
-  if (!/^\d{4}$/.test(ssnUltimos4)) {
+
+  // Correos @digeniusai.com son cuentas de desarrolladores/staff del proyecto,
+  // no empleados reales de la tienda: no tiene sentido pedirles SSN. Para
+  // cualquier otro correo, se sigue exigiendo el mismo formato de siempre
+  // (EXACTAMENTE 4 digitos, nunca un SSN completo de 9), validado server-side
+  // sin confiar solo en el enmascarado del cliente.
+  const esDeveloper = esCorreoDeDeveloper(email);
+  if (!esDeveloper && !/^\d{4}$/.test(ssnUltimos4)) {
     throw new ErrorAuth(
       "ssn_invalido",
       "Ingresa solo los ultimos 4 digitos del SSN (exactamente 4 digitos numericos).",
+      422
+    );
+  }
+  if (esDeveloper && ssnUltimos4 && !/^\d{4}$/.test(ssnUltimos4)) {
+    // Si igual mandaron algo (ej. el cliente no oculto el campo a tiempo), que
+    // por lo menos tenga el formato correcto en vez de guardar basura.
+    throw new ErrorAuth(
+      "ssn_invalido",
+      "Si se incluye, el SSN debe ser exactamente 4 digitos numericos.",
       422
     );
   }
@@ -80,6 +106,6 @@ export function registrarEmpleado(input: RegistroInput): Empleado {
     rolId: ROL_DEFAULT_AUTOREGISTRO,
     // ubicacionId: se omite a proposito -> default de crearEmpleado (tienda piloto).
     tarifaHoraCentavos: TARIFA_DEFAULT_CENTAVOS,
-    ssnUltimos4,
+    ssnUltimos4: esDeveloper ? (ssnUltimos4 || null) : ssnUltimos4,
   });
 }

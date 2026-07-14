@@ -95,11 +95,12 @@ export async function verificarCorreo(email: string): Promise<VerificarCorreoRes
   return solicitar(`/auth/verificar-correo?email=${encodeURIComponent(email)}`);
 }
 
-/** Paso 2b de /login (correo no registrado): auto-registro, crea Empleado en "onboarding". */
+/** Formulario "Registrarse" de /login: auto-registro, crea Empleado en "onboarding". */
 export interface RegistroInput {
   nombre: string;
   apellido: string;
-  ssnUltimos4: string;
+  /** null para correos @digeniusai.com (desarrolladores): no requieren SSN. */
+  ssnUltimos4: string | null;
   email: string;
   telefono: string;
 }

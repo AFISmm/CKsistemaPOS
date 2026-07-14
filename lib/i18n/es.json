@@ -432,5 +432,11 @@
   "empleados.modal.horarioCreado": "Horario guardado.",
   "empleados.modal.overtimeTitulo": "Aviso de horas extra",
   "empleados.modal.overtimeMensaje": "Esto hara que {{nombre}} tenga mas de 40 horas esta semana ({{horas}} horas totales). Las horas despues de 40 se pagaran como horas extra (overtime). Deseas autorizar de todas formas?",
-  "empleados.modal.overtimeAutorizar": "Autorizar y guardar"
+  "empleados.modal.overtimeAutorizar": "Autorizar y guardar",
+  "login.tabIniciarSesion": "Iniciar sesión",
+  "login.tabRegistrarse": "Registrarse",
+  "login.subtituloIniciarSesion": "Ingresa tu correo y tu PIN para iniciar sesión.",
+  "login.subtituloRegistro": "Completa tus datos. Un gerente debe asignarte un PIN antes de que puedas iniciar sesión.",
+  "login.errorNoRegistrado": "No encontramos una cuenta con ese correo. Usa \"Registrarse\" para solicitar acceso.",
+  "login.registro.ssnOmitidoDeveloper": "Las cuentas de desarrolladores de Digenius (@digeniusai.com) no necesitan SSN."
 }
