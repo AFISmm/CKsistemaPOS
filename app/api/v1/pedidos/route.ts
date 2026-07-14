@@ -5,10 +5,28 @@ import { respuestaError } from "@/lib/sales/http";
 
 export const dynamic = "force-dynamic";
 
-/** Estados agrupados que el KDS consulta con ?estado=cocina. */
-const ESTADOS_COCINA: EstadoPedido[] = ["enviadoCocina", "enPreparacion"];
+/**
+ * Estados agrupados que el KDS consulta con ?estado=cocina. Incluye "listo"
+ * a proposito (ciclo de vida extendido del pedido, Feature 3): antes, en
+ * cuanto un pedido llegaba a "listo" el backend dejaba de devolverlo aqui y
+ * el cliente lo desvanecia solo tras GRACIA_LISTO_MS; ahora un pedido "listo"
+ * DEBE seguir visible en el KDS (con el boton "Enviar a caja") hasta que el
+ * cajero/gerente lo confirme explicitamente — recien ahi pasa a "entregado"
+ * (ver lib/sales/engine.ts, enviarACaja) y sale de este filtro.
+ */
+const ESTADOS_COCINA: EstadoPedido[] = ["enviadoCocina", "enPreparacion", "listo"];
 
-/** GET /api/v1/pedidos?estado=<estado|cocina>&turnoId=<id> */
+/**
+ * Estados que conforman el "Historial de pedidos" del submodulo de Terminal
+ * de Cajero (app/pos/historial): pedidos que ya completaron su paso por
+ * cocina ("entregado") y/o ya fueron cobrados ("cobrado"). Se agrega este
+ * filtro especial `?estado=historial` (mismo patron que `?estado=cocina`)
+ * para poder traer AMBOS estados en una sola llamada, en vez de que el
+ * cliente tenga que hacer dos fetch y combinarlos.
+ */
+const ESTADOS_HISTORIAL: EstadoPedido[] = ["entregado", "cobrado"];
+
+/** GET /api/v1/pedidos?estado=<estado|cocina|historial>&turnoId=<id> */
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -19,6 +37,8 @@ export async function GET(request: Request) {
 
     if (estado === "cocina") {
       pedidos = pedidos.filter((p) => ESTADOS_COCINA.includes(p.estado));
+    } else if (estado === "historial") {
+      pedidos = pedidos.filter((p) => ESTADOS_HISTORIAL.includes(p.estado));
     } else if (estado) {
       pedidos = pedidos.filter((p) => p.estado === estado);
     }

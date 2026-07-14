@@ -5,9 +5,10 @@ import { useI18n } from "@/lib/shell/I18nProvider";
 import {
   clasesEstado,
   estadoCocinaAgregado,
-  excedeSla,
   formatearCronometro,
   msTranscurridos,
+  nivelAlertaTiempo,
+  referenciaTiempoCocina,
 } from "@/lib/kitchen/kds";
 
 /** Traduce el canal de origen del pedido a una clave de i18n (kds.canal.*). */
@@ -29,32 +30,52 @@ const CLAVE_ESTADO: Record<string, string> = {
 interface Props {
   pedido: Pedido;
   ahoraMs: number;
-  /** true = ya llego a "listo" y esta en periodo de gracia antes de salir de la cola. */
-  atenuado: boolean;
+  /** true = se acaba de confirmar "Enviar a caja"; se muestra un flash breve antes de salir de la cola. */
+  saliendo: boolean;
   /** true = hay una accion (POST) en curso para este pedido; deshabilita botones. */
   enProgreso: boolean;
   onAvanzar: (pedido: Pedido) => void;
+  onEnviarACaja: (pedido: Pedido) => void;
 }
 
 /** Tarjeta de comanda individual del KDS. Solo presentacion; sin fetch propio. */
 export default function OrderCard({
   pedido,
   ahoraMs,
-  atenuado,
+  saliendo,
   enProgreso,
   onAvanzar,
+  onEnviarACaja,
 }: Props) {
   const { t } = useI18n();
   const estado = estadoCocinaAgregado(pedido);
   const clases = clasesEstado(estado);
-  const transcurridoMs = msTranscurridos(pedido.creadoEn, ahoraMs);
-  const enAlerta = excedeSla(pedido.creadoEn, ahoraMs) && estado !== "listo";
+  const referenciaTiempo = referenciaTiempoCocina(pedido);
+  const transcurridoMs = msTranscurridos(referenciaTiempo, ahoraMs);
+  const nivelAlerta = nivelAlertaTiempo(referenciaTiempo, ahoraMs);
+
+  // El nivel de alerta de TIEMPO (amarillo/rojo, colores de alerta reales —
+  // NO son colores de marca) manda sobre el borde/fondo de estado de cocina
+  // en cuanto se activa; "normal" conserva el estilo por estado ya existente.
+  const bordeClase =
+    nivelAlerta === "rojo"
+      ? "border-red-600"
+      : nivelAlerta === "amarillo"
+        ? "border-yellow-400"
+        : clases.borde;
+  const fondoClase =
+    nivelAlerta === "rojo"
+      ? "bg-red-50 dark:bg-red-950/40"
+      : nivelAlerta === "amarillo"
+        ? "bg-yellow-50 dark:bg-yellow-950/40"
+        : "bg-white dark:bg-neutral-900";
+  const pulsoClase = nivelAlerta === "rojo" ? "animate-pulse" : "";
 
   return (
     <section
       aria-label={t("kds.comandaAria", { numero: pedido.numeroOrden })}
-      className={`flex flex-col rounded-2xl border-4 bg-white shadow-lg transition-opacity duration-700 dark:bg-neutral-900 ${clases.borde} ${
-        atenuado ? "opacity-40" : "opacity-100"
+      className={`flex flex-col rounded-2xl border-4 shadow-lg transition-opacity duration-500 ${bordeClase} ${fondoClase} ${pulsoClase} ${
+        saliendo ? "opacity-0" : "opacity-100"
       }`}
     >
       {/* Franja de estado */}
@@ -81,14 +102,23 @@ export default function OrderCard({
         </div>
         <div
           className={`rounded-lg px-3 py-2 text-right font-mono text-3xl font-bold tabular-nums ${
-            enAlerta ? "animate-pulse bg-red-700 text-white" : "text-neutral-700 dark:text-neutral-200"
+            nivelAlerta === "rojo"
+              ? "animate-pulse bg-red-700 text-white"
+              : nivelAlerta === "amarillo"
+                ? "bg-yellow-400 text-neutral-950"
+                : "text-neutral-700 dark:text-neutral-200"
           }`}
           aria-label={t("kds.tiempoAria")}
         >
           {formatearCronometro(transcurridoMs)}
-          {enAlerta && (
+          {nivelAlerta === "rojo" && (
             <div className="text-xs font-bold uppercase tracking-wider">
-              {t("kds.slaExcedido")}
+              {t("kds.alertaRoja")}
+            </div>
+          )}
+          {nivelAlerta === "amarillo" && (
+            <div className="text-xs font-bold uppercase tracking-wider">
+              {t("kds.alertaAmarilla")}
             </div>
           )}
         </div>
@@ -150,7 +180,7 @@ export default function OrderCard({
       </div>
 
       {/* Acciones */}
-      {!atenuado && (
+      {!saliendo && (
         <div className="p-3">
           {estado === "recibido" && (
             <button
@@ -173,9 +203,14 @@ export default function OrderCard({
             </button>
           )}
           {estado === "listo" && (
-            <div className="w-full rounded-xl bg-emerald-900 py-4 text-center text-xl font-bold uppercase text-emerald-300">
-              {t("kds.ordenLista")}
-            </div>
+            <button
+              type="button"
+              disabled={enProgreso}
+              onClick={() => onEnviarACaja(pedido)}
+              className="w-full rounded-xl bg-ck-red py-5 text-2xl font-extrabold uppercase text-white shadow active:scale-[0.98] disabled:opacity-50"
+            >
+              {enProgreso ? t("kds.enviando") : t("kds.enviarACaja")}
+            </button>
           )}
         </div>
       )}

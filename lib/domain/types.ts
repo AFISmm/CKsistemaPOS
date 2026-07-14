@@ -356,6 +356,26 @@ export interface Pedido {
   total: number; // centavos
   lineas: LineaDePedido[];
   creadoEn: string;
+  /**
+   * AGREGADO (ciclo de vida extendido de cocina/KDS): momento EXACTO en que el
+   * pedido entro a cocina (transicion "abierto" -> "enviadoCocina", fijado por
+   * `enviarACocina` en lib/sales/engine.ts). `null` mientras el pedido sigue
+   * "abierto" en el mostrador. NO confundir con `creadoEn` (cuando el cajero
+   * abrio el pedido; pueden pasar minutos mientras arma el ticket antes de
+   * enviarlo). El temporizador de alerta de cocina (lib/kitchen/kds.ts,
+   * `nivelAlertaTiempo`) se basa en ESTE campo (con fallback a `creadoEn` solo
+   * si es `null`, por robustez ante datos legados/sembrados).
+   */
+  enviadoACocinaEn: string | null;
+  /**
+   * AGREGADO (ciclo de vida extendido de cocina/KDS): momento en que el
+   * pedido salio del KDS hacia caja (transicion "listo" -> "entregado", fijado
+   * por `enviarACaja` en lib/sales/engine.ts). `null` mientras no se ha
+   * enviado a caja. Se usa en el submodulo de Historial de pedidos
+   * (app/pos/historial) para calcular cuanto tiempo total tomo el pedido en
+   * cocina (entregadoEn - enviadoACocinaEn).
+   */
+  entregadoEn: string | null;
   cerradoEn: string | null;
 }
 

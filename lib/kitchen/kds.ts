@@ -16,17 +16,39 @@ import type {
   Pedido,
 } from "../domain/types";
 
-/** SLA de servicio de cocina (demo): 5 minutos desde creadoEn. */
-export const SLA_MS = 5 * 60 * 1000;
-
 /**
- * Tiempo (ms) que una comanda permanece visible, atenuada, en la cola despues
- * de que TODAS sus lineas llegan a "listo". Pasado este tiempo se retira de
- * la vista local (aunque el backend tarde en dejar de devolverla, o la haya
- * dejado de devolver ya). Simplificacion de demo para dar feedback visual
- * inmediato sin depender del timing exacto del backend.
+ * Temporizador de cocina de 3 niveles (reemplaza el SLA_MS/excedeSla de 5 min
+ * de la version anterior de esta demo):
+ *  - "normal":   transcurrido <= TIEMPO_OBJETIVO_MS (15 min).
+ *  - "amarillo": transcurrido >  TIEMPO_ALERTA_AMARILLA_MS (a partir del
+ *                minuto 15:01). TIEMPO_ALERTA_AMARILLA_MS es literalmente el
+ *                mismo valor que TIEMPO_OBJETIVO_MS (15 min); se exportan dos
+ *                constantes separadas porque conceptualmente responden a
+ *                preguntas distintas ("¿cual es el objetivo?" vs "¿desde
+ *                cuando alerto en amarillo?"), aunque hoy compartan el numero.
+ *  - "rojo":     transcurrido >= TIEMPO_ALERTA_ROJA_MS (18 min). Ademas de la
+ *                alerta visual, esto dispara UNA notificacion al gerente (ver
+ *                lib/notificaciones/notificaciones.ts + app/kds/page.tsx).
+ *
+ * El transcurrido se mide siempre desde `enviadoACocinaEn` (momento real de
+ * entrada a cocina), NUNCA desde `creadoEn` (momento en que el cajero abrio el
+ * pedido en el mostrador, que puede ser minutos antes). Se usa `creadoEn` solo
+ * como fallback defensivo si `enviadoACocinaEn` viniera `null` (dato legado o
+ * inconsistente), para que el cronometro nunca quede sin referencia.
+ *
+ * CRITERIO DOCUMENTADO: esta alerta de tiempo se sigue calculando y mostrando
+ * incluso cuando el pedido ya esta "listo" (todas sus lineas listas) y hasta
+ * que se envia a caja (`enviarACaja`): a un gerente/cajero le interesa saber
+ * cuanto tiempo REAL lleva el pedido en cocina de punta a punta, incluyendo el
+ * tiempo que quedo "listo" esperando que alguien lo retire hacia caja. Una vez
+ * el pedido sale del KDS (estado "entregado"), deja de mostrarse en esta
+ * pantalla y por lo tanto deja de evaluarse aqui.
  */
-export const GRACIA_LISTO_MS = 8000;
+export const TIEMPO_OBJETIVO_MS = 15 * 60 * 1000;
+export const TIEMPO_ALERTA_AMARILLA_MS = TIEMPO_OBJETIVO_MS;
+export const TIEMPO_ALERTA_ROJA_MS = 18 * 60 * 1000;
+
+export type NivelAlertaTiempo = "normal" | "amarillo" | "rojo";
 
 /** Intervalo de polling contra `/api/v1/pedidos?estado=cocina` (demo; produccion = WebSocket, ADR-0003). */
 export const POLLING_MS = 2500;
@@ -59,9 +81,26 @@ export function formatearCronometro(ms: number): string {
   return `${String(min).padStart(2, "0")}:${String(seg).padStart(2, "0")}`;
 }
 
-/** true si el pedido supero el SLA de servicio (para resaltar en rojo). */
-export function excedeSla(desdeIso: string, ahoraMs: number): boolean {
-  return msTranscurridos(desdeIso, ahoraMs) > SLA_MS;
+/**
+ * Nivel de alerta de tiempo del pedido, puro y facil de probar con `ahoraMs`
+ * simulado (no depende del reloj real): pasa `pedido.enviadoACocinaEn ??
+ * pedido.creadoEn` como `enviadoACocinaEnOCreadoEn`. Ver documentacion de los
+ * umbrales arriba (TIEMPO_OBJETIVO_MS / TIEMPO_ALERTA_AMARILLA_MS /
+ * TIEMPO_ALERTA_ROJA_MS).
+ */
+export function nivelAlertaTiempo(
+  enviadoACocinaEnOCreadoEn: string,
+  ahoraMs: number
+): NivelAlertaTiempo {
+  const transcurrido = msTranscurridos(enviadoACocinaEnOCreadoEn, ahoraMs);
+  if (transcurrido >= TIEMPO_ALERTA_ROJA_MS) return "rojo";
+  if (transcurrido > TIEMPO_ALERTA_AMARILLA_MS) return "amarillo";
+  return "normal";
+}
+
+/** Referencia de tiempo a usar para el temporizador de cocina de un pedido (ver nivelAlertaTiempo). */
+export function referenciaTiempoCocina(pedido: Pedido): string {
+  return pedido.enviadoACocinaEn ?? pedido.creadoEn;
 }
 
 /** Formatea la hora actual (reloj de cabecera) como HH:MM:SS. */

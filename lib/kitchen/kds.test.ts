@@ -24,11 +24,12 @@ import {
   avanzarLocalOptimista,
   estadoCocinaAgregado,
   etiquetaCanal,
-  excedeSla,
   formatearCronometro,
+  nivelAlertaTiempo,
   normalizarRespuestaPedidos,
   ordenarFifo,
-  SLA_MS,
+  TIEMPO_ALERTA_ROJA_MS,
+  TIEMPO_OBJETIVO_MS,
 } from "./kds";
 
 // ---------- Fixtures ----------
@@ -68,6 +69,8 @@ function pedido(overrides: Partial<Pedido> = {}): Pedido {
     total: 1176,
     lineas: overrides.lineas ?? [linea()],
     creadoEn: overrides.creadoEn ?? new Date().toISOString(),
+    enviadoACocinaEn: overrides.enviadoACocinaEn ?? overrides.creadoEn ?? new Date().toISOString(),
+    entregadoEn: overrides.entregadoEn ?? null,
     cerradoEn: null,
     ...overrides,
   };
@@ -152,14 +155,35 @@ test("avanzarLocalOptimista: 'Listo' pasa las lineas preparando -> listo (flujo 
   assert.ok(p.lineas.every((l) => l.estadoCocina === "listo"));
 });
 
-// ---------- 3) Superacion de SLA ----------
+// ---------- 3) Temporizador de cocina de 3 niveles (15 min / 15:01 / 18 min) ----------
 
-test("excedeSla es false justo antes del limite y true justo despues (5 min)", () => {
+test("nivelAlertaTiempo: 'normal' en el limite exacto de TIEMPO_OBJETIVO_MS (15 min)", () => {
   const ahora = Date.now();
-  const dentroDeSla = new Date(ahora - (SLA_MS - 1000)).toISOString();
-  const fueraDeSla = new Date(ahora - (SLA_MS + 1000)).toISOString();
-  assert.equal(excedeSla(dentroDeSla, ahora), false);
-  assert.equal(excedeSla(fueraDeSla, ahora), true);
+  const enviadoACocinaEn = new Date(ahora - TIEMPO_OBJETIVO_MS).toISOString();
+  assert.equal(nivelAlertaTiempo(enviadoACocinaEn, ahora), "normal");
+});
+
+test("nivelAlertaTiempo: 'amarillo' justo despues de 15 min (15:01) y se mantiene antes de 18 min", () => {
+  const ahora = Date.now();
+  const justoDespues = new Date(ahora - (TIEMPO_OBJETIVO_MS + 1000)).toISOString();
+  assert.equal(nivelAlertaTiempo(justoDespues, ahora), "amarillo");
+
+  const diecisieteMin = new Date(ahora - 17 * 60 * 1000).toISOString();
+  assert.equal(nivelAlertaTiempo(diecisieteMin, ahora), "amarillo");
+});
+
+test("nivelAlertaTiempo: 'rojo' en el limite exacto de TIEMPO_ALERTA_ROJA_MS (18 min) y despues", () => {
+  const ahora = Date.now();
+  const dieciochoMinExacto = new Date(ahora - TIEMPO_ALERTA_ROJA_MS).toISOString();
+  assert.equal(nivelAlertaTiempo(dieciochoMinExacto, ahora), "rojo");
+
+  const veinteMin = new Date(ahora - 20 * 60 * 1000).toISOString();
+  assert.equal(nivelAlertaTiempo(veinteMin, ahora), "rojo");
+});
+
+test("nivelAlertaTiempo: pedido recien enviado a cocina (0 min transcurridos) es 'normal'", () => {
+  const ahora = Date.now();
+  assert.equal(nivelAlertaTiempo(new Date(ahora).toISOString(), ahora), "normal");
 });
 
 test("formatearCronometro da formato mm:ss (325s -> 05:25)", () => {

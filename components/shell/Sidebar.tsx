@@ -9,22 +9,22 @@
  * de ese breakpoint es un drawer que se abre/cierra con el boton hamburguesa
  * de la barra superior (ver Topbar.tsx / AppShell.tsx).
  *
- * Bloque inferior (debajo del nav, encima del aviso demo): el boton
+ * Bloque inferior (debajo del nav, encima del aviso demo): el link
  * "Gestionar perfiles" (solo visible si el rol tiene el permiso
  * "usuarios.gestionar", ver lib/db/store.ts) y el boton de "Cerrar sesion".
- * Ambos vivian antes en Topbar.tsx; se movieron aqui a pedido de producto
- * para agrupar las acciones de cuenta/sesion en un solo lugar. El saludo al
- * usuario (`usuarioActual.nombre`) SIGUE en Topbar.tsx.
+ * El saludo al usuario (`usuarioActual.nombre`) SIGUE en Topbar.tsx.
+ *
+ * "Gestionar perfiles" navega a /perfiles (pagina completa del portal) — a
+ * pedido de producto, YA NO abre un modal/ventana emergente (ver
+ * app/perfiles/page.tsx, que reemplazo a components/shell/GestionarPerfilesModal.tsx).
  */
 
-import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { modulosVisiblesParaRol } from "@/lib/navigation/modulos";
 import { useSesion } from "@/lib/shell/SesionProvider";
 import { useI18n } from "@/lib/shell/I18nProvider";
-import GestionarPerfilesModal from "@/components/shell/GestionarPerfilesModal";
 
 interface SidebarProps {
   abierto: boolean;
@@ -37,7 +37,6 @@ export default function Sidebar({ abierto, onCerrar }: SidebarProps) {
   const { usuarioActual, logout } = useSesion();
   const { t } = useI18n();
   const modulos = modulosVisiblesParaRol(usuarioActual?.rol);
-  const [mostrarPerfiles, setMostrarPerfiles] = useState(false);
 
   const puedeGestionarPerfiles = usuarioActual?.rol.permisos.includes("usuarios.gestionar") ?? false;
 
@@ -95,13 +94,18 @@ export default function Sidebar({ abierto, onCerrar }: SidebarProps) {
 
         <div className="space-y-1 border-t border-neutral-100 px-2 py-2 dark:border-neutral-800">
           {puedeGestionarPerfiles && (
-            <button
-              type="button"
-              onClick={() => setMostrarPerfiles(true)}
-              className="flex min-h-[44px] w-full items-center rounded-lg px-3 text-left text-sm font-semibold text-neutral-700 transition hover:bg-ck-cream dark:text-neutral-300 dark:hover:bg-neutral-800"
+            <Link
+              href="/perfiles"
+              onClick={onCerrar}
+              aria-current={pathname === "/perfiles" ? "page" : undefined}
+              className={`flex min-h-[44px] items-center rounded-lg px-3 text-sm font-semibold transition ${
+                pathname === "/perfiles"
+                  ? "bg-ck-red text-white"
+                  : "text-neutral-700 hover:bg-ck-cream dark:text-neutral-300 dark:hover:bg-neutral-800"
+              }`}
             >
               {t("sidebar.gestionarPerfiles")}
-            </button>
+            </Link>
           )}
           <button
             type="button"
@@ -116,10 +120,6 @@ export default function Sidebar({ abierto, onCerrar }: SidebarProps) {
           {t("sidebar.demoAviso")}
         </p>
       </aside>
-
-      {mostrarPerfiles && (
-        <GestionarPerfilesModal onCerrar={() => setMostrarPerfiles(false)} />
-      )}
     </>
   );
 }

@@ -1,22 +1,33 @@
 "use client";
 
 /**
- * Modal "Gestionar perfiles" — abierto desde el sidebar (permiso
- * "usuarios.gestionar", ver lib/db/store.ts).
+ * /perfiles — "Gestionar perfiles" como PANTALLA COMPLETA (a pedido del dueno
+ * de producto: antes era un modal/ventana emergente abierto desde el
+ * sidebar; ahora es una pagina normal del portal, igual que /empleados o
+ * /nomina). El contenido y la logica son los mismos que tenia el modal
+ * anterior (components/shell/GestionarPerfilesModal.tsx, eliminado): lista
+ * EMPLEADOS (no solo Usuario) con su horario de la semana, PIN de acceso y
+ * tarifa por hora, cada uno editable.
  *
- * Lista EMPLEADOS (no solo Usuario): por cada uno muestra su horario
- * asignado de la semana actual, permite cambiarlo (reutiliza
- * components/empleados/AgregarHorarioModal.tsx tal cual, sin duplicar la
- * logica de aviso de horas extra), muestra/edita su tarifa por hora, y
- * muestra/cambia su PIN de acceso.
+ * Acceso: el link del sidebar solo se muestra con el permiso
+ * "usuarios.gestionar" (ver components/shell/Sidebar.tsx y lib/db/store.ts),
+ * mismo criterio de visibilidad que el resto de paginas gerenciales de esta
+ * demo (no hay guard de servidor adicional, ver limitaciones ya documentadas
+ * en README-DEMO.md).
+ *
+ * Las acciones puntuales (cambiar PIN, cambiar horario) siguen siendo
+ * modales pequenos de una sola accion, igual que en /empleados (onboarding,
+ * baja, agregar horario) — lo que pidio el dueno de producto es que la
+ * PANTALLA PRINCIPAL de gestion no sea un popup, no que cada micro-accion
+ * dentro de ella deje de serlo.
  *
  * REGLA DURA: solo habla con el backend via components/shell/api.ts y
- * components/empleados/api.ts (mismo patron ya establecido por el resto del
- * shell) — nunca importa lib/db, lib/auth ni lib/rrhh en runtime (si acaso,
- * solo lib/rrhh/formatoHorario.ts, que es deliberadamente PURO y no importa
- * lib/db/store, ver comentario en ese archivo).
+ * components/empleados/api.ts (mismo patron ya establecido) — nunca importa
+ * lib/db, lib/auth ni lib/rrhh en runtime (salvo lib/rrhh/formatoHorario.ts,
+ * deliberadamente puro, ver comentario en ese archivo).
  */
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { Empleado, HorarioTurno, Rol } from "@/lib/domain/types";
 import { formatearDinero } from "@/lib/domain/types";
@@ -37,8 +48,9 @@ import {
 } from "@/components/shell/api";
 import { editarEmpleado, listarEmpleados, listarHorarios } from "@/components/empleados/api";
 import AgregarHorarioModal from "@/components/empleados/AgregarHorarioModal";
+import FondoFoto from "@/components/shell/FondoFoto";
 
-export default function GestionarPerfilesModal({ onCerrar }: { onCerrar: () => void }) {
+export default function GestionarPerfilesPage() {
   const { t, idioma } = useI18n();
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [usuarios, setUsuarios] = useState<UsuarioConPinDemo[]>([]);
@@ -87,29 +99,33 @@ export default function GestionarPerfilesModal({ onCerrar }: { onCerrar: () => v
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-2xl bg-white p-6 shadow-xl dark:bg-neutral-900">
-        <div className="mb-1 flex items-start justify-between gap-3">
-          <h2 className="text-lg font-bold text-ck-dark dark:text-neutral-100">{t("perfiles.modal.titulo")}</h2>
-          <button
-            type="button"
-            onClick={onCerrar}
-            aria-label={t("perfiles.modal.cerrar")}
-            className="text-sm text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200"
-          >
-            ✕
-          </button>
+    <main className="relative min-h-screen overflow-hidden bg-ck-cream p-6 dark:bg-neutral-950">
+      <FondoFoto />
+      <div className="relative z-10 mx-auto max-w-4xl">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-ck-dark dark:text-neutral-100">
+              {t("perfiles.modal.titulo")}
+            </h1>
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">
+              {t("perfiles.modal.descripcion")}
+            </p>
+          </div>
+          <Link href="/" className="text-sm text-ck-red underline dark:text-red-400">
+            {t("empleados.inicio")}
+          </Link>
         </div>
-        <p className="mb-4 text-xs text-neutral-600 dark:text-neutral-400">{t("perfiles.modal.descripcion")}</p>
 
         {error && (
-          <div className="mb-3 rounded-lg bg-red-50 p-2 text-sm text-ck-red dark:bg-red-950/40 dark:text-red-300">{error}</div>
+          <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-ck-red dark:bg-red-950/40 dark:text-red-300">
+            {error}
+          </div>
         )}
 
         {cargando ? (
           <p className="text-sm text-neutral-600 dark:text-neutral-400">{t("perfiles.modal.cargando")}</p>
         ) : (
-          <ul className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+          <ul className="space-y-3">
             {empleados.map((empleado) => {
               const usuario = empleado.usuarioId
                 ? usuarios.find((u) => u.id === empleado.usuarioId)
@@ -132,22 +148,12 @@ export default function GestionarPerfilesModal({ onCerrar }: { onCerrar: () => v
               );
             })}
             {empleados.length === 0 && (
-              <li className="p-6 text-center text-sm text-neutral-500 dark:text-neutral-400">
+              <li className="rounded-xl bg-white p-6 text-center text-sm text-neutral-500 shadow-sm dark:bg-neutral-900 dark:text-neutral-400">
                 {t("empleados.sinEmpleados")}
               </li>
             )}
           </ul>
         )}
-
-        <div className="mt-4 flex justify-end">
-          <button
-            type="button"
-            onClick={onCerrar}
-            className="rounded-xl border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-600 dark:border-neutral-600 dark:text-neutral-300"
-          >
-            {t("perfiles.modal.cerrar")}
-          </button>
-        </div>
       </div>
 
       {cambiandoPinDe && (
@@ -171,11 +177,11 @@ export default function GestionarPerfilesModal({ onCerrar }: { onCerrar: () => v
           onCancelar={() => setHorarioDe(null)}
         />
       )}
-    </div>
+    </main>
   );
 }
 
-/** Fila de un empleado dentro del panel: horario/PIN/tarifa, cada uno con su propia edicion inline. */
+/** Fila de un empleado dentro de la pagina: horario/PIN/tarifa, cada uno con su propia edicion inline. */
 function FilaEmpleado({
   empleado,
   usuario,
@@ -226,7 +232,7 @@ function FilaEmpleado({
   }
 
   return (
-    <li className="rounded-xl border border-neutral-200 p-4 dark:border-neutral-700">
+    <li className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-ck-dark dark:text-neutral-100">{empleado.nombre}</p>

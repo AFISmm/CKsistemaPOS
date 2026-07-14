@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/lib/shell/I18nProvider";
 import FondoFoto from "@/components/shell/FondoFoto";
@@ -320,6 +321,12 @@ export default function TerminalCajeroPage() {
               {t("pos.sinConexion")}
             </span>
           )}
+          <Link
+            href="/pos/historial"
+            className="rounded-xl border border-neutral-300 px-4 py-2 text-sm font-bold text-ck-dark active:scale-95 dark:border-neutral-700 dark:text-neutral-100"
+          >
+            {t("pos.historialLink")}
+          </Link>
           <button
             type="button"
             onClick={manejarNuevoPedido}

@@ -178,6 +178,17 @@ export function obtenerPedido(pedidoId: string): Promise<Pedido> {
   return solicitarPedido(`/pedidos/${pedidoId}`);
 }
 
+/**
+ * Lista pedidos por estado agrupado o exacto (ver app/api/v1/pedidos/route.ts):
+ * "cocina" (enviadoCocina/enPreparacion/listo), "historial" (entregado/cobrado)
+ * o cualquier EstadoPedido exacto. Usado por app/pos/historial/page.tsx.
+ */
+export function listarPedidosPorEstado(estado: string): Promise<Pedido[]> {
+  return solicitar<{ pedidos: Pedido[] }>(
+    `/pedidos?estado=${encodeURIComponent(estado)}`
+  ).then((r) => r.pedidos);
+}
+
 export function agregarLinea(pedidoId: string, body: NuevaLineaBody): Promise<Pedido> {
   return solicitarPedido(`/pedidos/${pedidoId}/lineas`, {
     method: "POST",

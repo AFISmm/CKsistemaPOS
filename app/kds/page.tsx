@@ -25,22 +25,24 @@ import { useI18n } from "@/lib/shell/I18nProvider";
 import OrderCard from "@/components/kds/OrderCard";
 import FondoFoto from "@/components/shell/FondoFoto";
 import {
-  GRACIA_LISTO_MS,
   POLLING_MS,
   avanzarLocalOptimista,
-  estadoCocinaAgregado,
   formatearReloj,
+  nivelAlertaTiempo,
   normalizarRespuestaPedidos,
   ordenarFifo,
+  referenciaTiempoCocina,
+  type NivelAlertaTiempo,
 } from "@/lib/kitchen/kds";
 
 /** Clave de cache local (demo de resiliencia offline ante recarga de pagina). */
 const CACHE_KEY = "ck-kds-cache-v1";
 
+/** Cuanto dura el flash de confirmacion visual al pulsar "Enviar a caja" antes de retirar la tarjeta localmente. */
+const FLASH_SALIENDO_MS = 500;
+
 interface EntradaCola {
   pedido: Pedido;
-  /** timestamp (ms) desde que la tarjeta quedo "lista"; null si no lo esta. */
-  listoDesde: number | null;
 }
 
 export default function KdsPage() {
@@ -50,51 +52,73 @@ export default function KdsPage() {
   const [conError, setConError] = useState(false);
   const [cargandoInicial, setCargandoInicial] = useState(true);
   const [enProgreso, setEnProgreso] = useState<Record<string, boolean>>({});
+  const [saliendoIds, setSaliendoIds] = useState<Record<string, boolean>>({});
 
   const enVueloRef = useRef(false);
+  // Nivel de alerta de tiempo visto en el poll anterior, por pedido (fuera de
+  // React state a proposito: es solo para DETECTAR la transicion a "rojo" y
+  // disparar la notificacion una vez; no debe causar re-renders por si solo).
+  const nivelAlertaPrevioRef = useRef<Record<string, NivelAlertaTiempo>>({});
 
   /**
-   * Fusiona la respuesta mas reciente del backend con el estado local:
-   *  - Detecta cuando una tarjeta pasa a "listo" (todas sus lineas listas) y
-   *    marca `listoDesde` para poder atenuarla/retirarla tras `GRACIA_LISTO_MS`.
-   *  - Conserva por un rato tarjetas que el backend dejo de devolver (porque
-   *    el pedido salio de la cola de cocina) si acababan de quedar listas,
-   *    para no hacerlas desaparecer de golpe de la pantalla.
+   * Fusiona la respuesta mas reciente del backend con el estado local. Desde
+   * que el backend incluye "listo" en `?estado=cocina` (ver
+   * app/api/v1/pedidos/route.ts) y el pedido solo sale de esta cola cuando su
+   * `Pedido.estado` pasa a "entregado" (accion explicita "Enviar a caja"), ya
+   * NO hace falta retener localmente tarjetas que el backend dejo de devolver
+   * (el viejo esquema de "gracia" de GRACIA_LISTO_MS): si el backend no la
+   * trae, es porque ya se envio a caja, y debe desaparecer de inmediato.
    */
   const fusionar = useCallback(
     (
-      previas: Record<string, EntradaCola>,
+      _previas: Record<string, EntradaCola>,
       nuevos: Pedido[]
     ): Record<string, EntradaCola> => {
-      const ahora = Date.now();
-      const idsNuevos = new Set(nuevos.map((p) => p.id));
       const resultado: Record<string, EntradaCola> = {};
-
       for (const pedido of nuevos) {
-        const previa = previas[pedido.id];
-        const estado = estadoCocinaAgregado(pedido);
-        let listoDesde = previa?.listoDesde ?? null;
-        if (estado === "listo" && listoDesde === null) {
-          listoDesde = ahora;
-        } else if (estado !== "listo") {
-          listoDesde = null;
-        }
-        resultado[pedido.id] = { pedido, listoDesde };
+        resultado[pedido.id] = { pedido };
       }
-
-      for (const [id, previa] of Object.entries(previas)) {
-        if (
-          !idsNuevos.has(id) &&
-          previa.listoDesde !== null &&
-          ahora - previa.listoDesde < GRACIA_LISTO_MS
-        ) {
-          resultado[id] = previa;
-        }
-      }
-
       return resultado;
     },
     []
+  );
+
+  /**
+   * Detecta pedidos que ACABAN de cruzar a nivel de alerta "rojo" (18+ min sin
+   * salir de cocina) comparando contra el nivel visto en el poll anterior, y
+   * dispara la notificacion al gerente una sola vez por pedido (Feature 2). El
+   * backend tambien deduplica por si esto se llamara mas de una vez (ver
+   * lib/notificaciones/notificaciones.ts, crearNotificacion), asi que esto es
+   * seguro incluso si el poll se reintenta o el pedido desaparece y reaparece.
+   */
+  const detectarYNotificarDemoras = useCallback(
+    (pedidos: Pedido[]) => {
+      const ahora = Date.now();
+      const nivelesActuales: Record<string, NivelAlertaTiempo> = {};
+      for (const pedido of pedidos) {
+        const nivel = nivelAlertaTiempo(referenciaTiempoCocina(pedido), ahora);
+        nivelesActuales[pedido.id] = nivel;
+        const anterior = nivelAlertaPrevioRef.current[pedido.id];
+        if (nivel === "rojo" && anterior !== "rojo") {
+          fetch("/api/v1/notificaciones", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ubicacionId: pedido.ubicacionId,
+              tipo: "pedido",
+              titulo: t("kds.notificacionDemoraTitulo"),
+              mensaje: t("kds.notificacionDemoraMensaje", { numero: pedido.numeroOrden }),
+              entidadRelacionadaHref: `/kds?pedidoId=${pedido.id}`,
+            }),
+          }).catch(() => {
+            // Best-effort: si falla la notificacion no se rompe el KDS; el
+            // proximo poll (si el pedido sigue en rojo) lo vuelve a intentar.
+          });
+        }
+      }
+      nivelAlertaPrevioRef.current = nivelesActuales;
+    },
+    [t]
   );
 
   // Hidratar desde cache local (si existe) antes del primer fetch: permite
@@ -127,6 +151,7 @@ export default function KdsPage() {
       const json: unknown = await res.json();
       const pedidos = normalizarRespuestaPedidos(json);
       setEntradas((prev) => fusionar(prev, pedidos));
+      detectarYNotificarDemoras(pedidos);
       setConError(false);
       try {
         window.localStorage.setItem(CACHE_KEY, JSON.stringify(pedidos));
@@ -141,7 +166,7 @@ export default function KdsPage() {
       enVueloRef.current = false;
       setCargandoInicial(false);
     }
-  }, [fusionar]);
+  }, [fusionar, detectarYNotificarDemoras]);
 
   // Polling principal.
   useEffect(() => {
@@ -166,14 +191,7 @@ export default function KdsPage() {
         const previa = prev[pedido.id];
         if (!previa) return prev;
         const siguiente = avanzarLocalOptimista(previa.pedido);
-        const estado = estadoCocinaAgregado(siguiente);
-        return {
-          ...prev,
-          [pedido.id]: {
-            pedido: siguiente,
-            listoDesde: estado === "listo" ? Date.now() : null,
-          },
-        };
+        return { ...prev, [pedido.id]: { pedido: siguiente } };
       });
 
       try {
@@ -197,12 +215,52 @@ export default function KdsPage() {
     [enProgreso, consultar]
   );
 
+  /**
+   * "Enviar a caja" (Feature 3): transicion "listo" -> "entregado". Al
+   * confirmar con el backend, se muestra un flash breve (`saliendoIds`,
+   * `FLASH_SALIENDO_MS`) y luego se retira la tarjeta localmente; el
+   * siguiente poll de todas formas ya no la traeria (el backend deja de
+   * devolver pedidos "entregado" en `?estado=cocina`), asi que este retiro
+   * local solo adelanta el feedback visual sin depender del timing exacto
+   * del proximo poll.
+   */
+  const enviarACaja = useCallback(
+    async (pedido: Pedido) => {
+      if (enProgreso[pedido.id]) return;
+      setEnProgreso((prev) => ({ ...prev, [pedido.id]: true }));
+      try {
+        const res = await fetch(`/api/v1/pedidos/${pedido.id}/enviar-caja`, {
+          method: "POST",
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setConError(false);
+        setSaliendoIds((prev) => ({ ...prev, [pedido.id]: true }));
+        setTimeout(() => {
+          setEntradas((prev) => {
+            if (!(pedido.id in prev)) return prev;
+            const { [pedido.id]: _quitado, ...resto } = prev;
+            return resto;
+          });
+          setSaliendoIds((prev) => {
+            if (!(pedido.id in prev)) return prev;
+            const { [pedido.id]: _quitado, ...resto } = prev;
+            return resto;
+          });
+        }, FLASH_SALIENDO_MS);
+      } catch {
+        // Sin conexion: no marcamos "saliendo" (seguiria visible en el KDS
+        // hasta que el proximo poll exitoso confirme el estado real).
+        setConError(true);
+      } finally {
+        setEnProgreso((prev) => ({ ...prev, [pedido.id]: false }));
+        consultar();
+      }
+    },
+    [enProgreso, consultar]
+  );
+
   const listaOrdenada = ordenarFifo(Object.values(entradas).map((e) => e.pedido));
-  const visibles = listaOrdenada.filter((p) => {
-    const entrada = entradas[p.id];
-    if (!entrada || entrada.listoDesde === null) return true;
-    return ahoraMs - entrada.listoDesde <= GRACIA_LISTO_MS;
-  });
+  const visibles = listaOrdenada;
 
   return (
     <main className="pos-notouch relative min-h-screen overflow-hidden bg-neutral-100 p-4 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
@@ -257,20 +315,17 @@ export default function KdsPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {visibles.map((pedido) => {
-            const entrada = entradas[pedido.id];
-            const atenuado = !!entrada && entrada.listoDesde !== null;
-            return (
-              <OrderCard
-                key={pedido.id}
-                pedido={pedido}
-                ahoraMs={ahoraMs}
-                atenuado={atenuado}
-                enProgreso={!!enProgreso[pedido.id]}
-                onAvanzar={avanzar}
-              />
-            );
-          })}
+          {visibles.map((pedido) => (
+            <OrderCard
+              key={pedido.id}
+              pedido={pedido}
+              ahoraMs={ahoraMs}
+              saliendo={!!saliendoIds[pedido.id]}
+              enProgreso={!!enProgreso[pedido.id]}
+              onAvanzar={avanzar}
+              onEnviarACaja={enviarACaja}
+            />
+          ))}
         </div>
       )}
       </div>

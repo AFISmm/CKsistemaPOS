@@ -159,6 +159,8 @@ export function crearPedido(input: NuevoPedidoInput = {}): Pedido {
     total: 0,
     lineas: [],
     creadoEn: ahora(),
+    enviadoACocinaEn: null,
+    entregadoEn: null,
     cerradoEn: null,
   };
 
@@ -360,6 +362,7 @@ export function enviarACocina(pedidoId: string): Pedido {
   }
 
   pedido.estado = "enviadoCocina";
+  pedido.enviadoACocinaEn = ahora();
   for (const linea of pedido.lineas) {
     linea.estadoCocina = "recibido";
   }
@@ -396,6 +399,32 @@ export function avanzarEstadoCocina(pedidoId: string, lineaId?: string): Pedido 
   } else if (pedido.lineas.some((l) => l.estadoCocina === "preparando")) {
     pedido.estado = "enPreparacion";
   }
+
+  return pedido;
+}
+
+/**
+ * Envia el pedido de cocina (KDS) a caja: transicion "listo" -> "entregado".
+ * "entregado" es un valor de EstadoPedido que ya existia en el contrato de
+ * tipos pero no se usaba hasta ahora; este es exactamente su proposito: marca
+ * que el pedido termino su paso por cocina y esta listo para que el cajero lo
+ * cobre. A partir de aqui el pedido deja de aparecer en `?estado=cocina`
+ * (ver app/api/v1/pedidos/route.ts) y pasa a ser visible en el submodulo de
+ * Historial de pedidos (app/pos/historial) junto con los ya "cobrado".
+ */
+export function enviarACaja(pedidoId: string): Pedido {
+  const pedido = obtenerPedidoOrThrow(pedidoId);
+
+  if (pedido.estado !== "listo") {
+    throw new ErrorDominio(
+      "estado_invalido",
+      `El pedido ${pedidoId} esta en estado "${pedido.estado}"; solo se puede enviar a caja desde "listo"`,
+      409
+    );
+  }
+
+  pedido.estado = "entregado";
+  pedido.entregadoEn = ahora();
 
   return pedido;
 }
