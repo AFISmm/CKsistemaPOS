@@ -17,6 +17,8 @@
 import { ErrorPago, obtenerPago, reembolsarPago } from "@/lib/payments/pagos";
 import { obtenerPedido, saldoPendiente } from "@/lib/sales/engine";
 
+import { conPersistencia } from "@/lib/db/store";
+
 export const dynamic = "force-dynamic";
 
 interface CuerpoReembolsoRequest {
@@ -33,48 +35,50 @@ export async function POST(
   request: Request,
   { params }: { params: { id: string } }
 ): Promise<Response> {
-  const pagoId = params.id;
+  return conPersistencia(async () => {
+    const pagoId = params.id;
 
-  let cuerpo: CuerpoReembolsoRequest = {};
-  try {
-    const texto = await request.text();
-    cuerpo = texto ? (JSON.parse(texto) as CuerpoReembolsoRequest) : {};
-  } catch {
-    return errorJson("CUERPO_INVALIDO", "el body debe ser JSON valido", 400);
-  }
-
-  const pago = obtenerPago(pagoId);
-  if (!pago) {
-    return errorJson("PAGO_NO_ENCONTRADO", `pago ${pagoId} no existe`, 404);
-  }
-
-  const { monto, motivo, usuarioId } = cuerpo;
-
-  try {
-    const { pago: pagoReembolsado } = reembolsarPago(pago, {
-      monto: typeof monto === "number" ? monto : undefined,
-      motivo: typeof motivo === "string" ? motivo : undefined,
-      usuarioId: typeof usuarioId === "string" ? usuarioId : null,
-    });
-
-    // Best-effort: informamos saldo/pedido actual (no recalculado por este
-    // reembolso; ese recalculo es responsabilidad de backend-ventas-pos si
-    // decide reflejarlo en el Pedido, ver nota en lib/payments/pagos.ts).
-    let saldo: number | null = null;
-    let pedido = null;
+    let cuerpo: CuerpoReembolsoRequest = {};
     try {
-      pedido = obtenerPedido(pagoReembolsado.pedidoId) ?? null;
-      saldo = saldoPendiente(pagoReembolsado.pedidoId);
+      const texto = await request.text();
+      cuerpo = texto ? (JSON.parse(texto) as CuerpoReembolsoRequest) : {};
     } catch {
-      // backend-ventas-pos aun no implementado; no bloquea el reembolso.
+      return errorJson("CUERPO_INVALIDO", "el body debe ser JSON valido", 400);
     }
 
-    return Response.json({ pago: pagoReembolsado, saldoPendiente: saldo, pedido });
-  } catch (err) {
-    if (err instanceof ErrorPago) {
-      return errorJson(err.codigo, err.message, err.status);
+    const pago = obtenerPago(pagoId);
+    if (!pago) {
+      return errorJson("PAGO_NO_ENCONTRADO", `pago ${pagoId} no existe`, 404);
     }
-    const mensaje = err instanceof Error ? err.message : "error desconocido";
-    return errorJson("ERROR_INTERNO", mensaje, 500);
-  }
+
+    const { monto, motivo, usuarioId } = cuerpo;
+
+    try {
+      const { pago: pagoReembolsado } = reembolsarPago(pago, {
+        monto: typeof monto === "number" ? monto : undefined,
+        motivo: typeof motivo === "string" ? motivo : undefined,
+        usuarioId: typeof usuarioId === "string" ? usuarioId : null,
+      });
+
+      // Best-effort: informamos saldo/pedido actual (no recalculado por este
+      // reembolso; ese recalculo es responsabilidad de backend-ventas-pos si
+      // decide reflejarlo en el Pedido, ver nota en lib/payments/pagos.ts).
+      let saldo: number | null = null;
+      let pedido = null;
+      try {
+        pedido = obtenerPedido(pagoReembolsado.pedidoId) ?? null;
+        saldo = saldoPendiente(pagoReembolsado.pedidoId);
+      } catch {
+        // backend-ventas-pos aun no implementado; no bloquea el reembolso.
+      }
+
+      return Response.json({ pago: pagoReembolsado, saldoPendiente: saldo, pedido });
+    } catch (err) {
+      if (err instanceof ErrorPago) {
+        return errorJson(err.codigo, err.message, err.status);
+      }
+      const mensaje = err instanceof Error ? err.message : "error desconocido";
+      return errorJson("ERROR_INTERNO", mensaje, 500);
+    }
+  });
 }

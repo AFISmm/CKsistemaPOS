@@ -1,6 +1,8 @@
 import { reportarIntentoFacial } from "@/lib/jornada/marcaje";
 import { respuestaErrorJornada } from "@/lib/jornada/http";
 
+import { conPersistencia } from "@/lib/db/store";
+
 export const dynamic = "force-dynamic";
 
 /**
@@ -15,20 +17,22 @@ export const dynamic = "force-dynamic";
  * el tiempo restante y ofrezca el PIN de respaldo cuando corresponda.
  */
 export async function POST(request: Request) {
-  try {
-    const body = (await request.json().catch(() => ({}))) as {
-      empleadoId?: string;
-      exitoso?: boolean;
-    };
-    if (!body.empleadoId || typeof body.exitoso !== "boolean") {
-      return Response.json(
-        { codigo: "campos_requeridos", mensaje: "empleadoId y exitoso (boolean) son requeridos" },
-        { status: 422 }
-      );
+  return conPersistencia(async () => {
+    try {
+      const body = (await request.json().catch(() => ({}))) as {
+        empleadoId?: string;
+        exitoso?: boolean;
+      };
+      if (!body.empleadoId || typeof body.exitoso !== "boolean") {
+        return Response.json(
+          { codigo: "campos_requeridos", mensaje: "empleadoId y exitoso (boolean) son requeridos" },
+          { status: 422 }
+        );
+      }
+      const resultado = reportarIntentoFacial(body.empleadoId, body.exitoso);
+      return Response.json(resultado);
+    } catch (e) {
+      return respuestaErrorJornada(e);
     }
-    const resultado = reportarIntentoFacial(body.empleadoId, body.exitoso);
-    return Response.json(resultado);
-  } catch (e) {
-    return respuestaErrorJornada(e);
-  }
+  });
 }

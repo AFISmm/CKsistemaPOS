@@ -1,6 +1,8 @@
 import { obtenerCodigoVigente } from "@/lib/jornada/marcaje";
 import { respuestaErrorJornada } from "@/lib/jornada/http";
 
+import { conPersistencia } from "@/lib/db/store";
+
 export const dynamic = "force-dynamic";
 
 /**
@@ -10,18 +12,20 @@ export const dynamic = "force-dynamic";
  * (/jornada/pantalla), nunca por el celular del empleado.
  */
 export async function GET(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const ubicacionId = searchParams.get("ubicacionId");
-    if (!ubicacionId) {
-      return Response.json(
-        { codigo: "ubicacionId_requerido", mensaje: "ubicacionId es requerido" },
-        { status: 400 }
-      );
+  return conPersistencia(async () => {
+    try {
+      const { searchParams } = new URL(request.url);
+      const ubicacionId = searchParams.get("ubicacionId");
+      if (!ubicacionId) {
+        return Response.json(
+          { codigo: "ubicacionId_requerido", mensaje: "ubicacionId es requerido" },
+          { status: 400 }
+        );
+      }
+      const vigente = obtenerCodigoVigente(ubicacionId);
+      return Response.json(vigente);
+    } catch (e) {
+      return respuestaErrorJornada(e);
     }
-    const vigente = obtenerCodigoVigente(ubicacionId);
-    return Response.json(vigente);
-  } catch (e) {
-    return respuestaErrorJornada(e);
-  }
+  });
 }

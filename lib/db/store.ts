@@ -41,6 +41,7 @@ import type {
 } from "../domain/types";
 import { getSeedCatalogo } from "../data/catalog";
 import { getSeedRrhh, usuariosAdicionalesRrhh } from "../data/rrhh-seed";
+import { Redis } from "@upstash/redis";
 
 export interface Db {
   ubicaciones: Ubicacion[];
@@ -383,7 +384,119 @@ export function getDb(): Db {
 export function resetDb(): Db {
   g.__ckPosDb = crearDbVacia();
   sembrar(g.__ckPosDb);
+  // Tambien limpiamos la copia persistida en Redis (fire-and-forget: no
+  // convertimos resetDb() en async para no romper los llamadores sincronos
+  // existentes -- rutas API y pruebas unitarias en lib/sales/__tests__ que
+  // invocan resetDb() de forma sincrona). Si Redis no esta configurado o
+  // falla, no pasa nada: el proximo cold start igual arranca con el estado
+  // sembrado por defecto (misma funcion sembrar() de arriba), asi que el
+  // resultado observable es identico.
+  void borrarDbEnRedis();
   return g.__ckPosDb;
+}
+
+// ----- Persistencia en Redis (Upstash) -----
+//
+// PROBLEMA QUE RESUELVE ESTA SECCION: en Vercel (serverless) cada invocacion
+// puede caer en una instancia nueva del proceso, que pierde por completo
+// `globalThis.__ckPosDb`. Antes de tener esto, un pedido creado hace unos
+// minutos podia "desaparecer" (ej. error real de usuario: "Pedido X no
+// existe" al tocar un plato) simplemente porque la siguiente invocacion cayo
+// en una instancia distinta sin ese estado en memoria.
+//
+// SOLUCION (demo): ademas del singleton en memoria de arriba, cada request de
+// la API hidrata ese singleton desde Redis al empezar y lo vuelve a persistir
+// a Redis al terminar (ver conPersistencia() abajo). Redis (Upstash, cliente
+// REST/fetch, sin conexiones TCP persistentes) actua como la "fuente de
+// verdad" que sobrevive al reciclaje de instancias; la memoria sigue siendo
+// solo una copia de trabajo rapida para el resto del request.
+//
+// NOTA DE ESCALA (simplificacion de demo, igual que las demas notas de este
+// archivo): serializamos el objeto Db COMPLETO como un unico blob JSON en
+// cada request. Para esta demo (pocos empleados/pedidos) son unos pocos KB y
+// no vale la pena optimizar mas. Con carga real (muchas ubicaciones, miles de
+// pedidos/eventos de auditoria) esto NO escalaria: habria que granularizar
+// por coleccion (ej. una clave de Redis por pedido/turno/empleado, o un hash)
+// para no leer/escribir todo el estado en cada llamada.
+
+const CLAVE_REDIS = "ck-pos:db:v1";
+
+/**
+ * Cliente de Redis (Upstash) si las variables de entorno estan configuradas,
+ * o null si no (por ejemplo en pruebas unitarias locales sin .env.local
+ * completo). Nunca lanza: si falta configuracion, simplemente seguimos
+ * funcionando solo en memoria (mejor que romper la demo).
+ */
+function obtenerClienteRedis(): Redis | null {
+  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) return null;
+  try {
+    return Redis.fromEnv();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Hidrata el singleton en memoria con el ultimo estado guardado en Redis (si
+ * existe), MUTANDO el mismo objeto (no reasignando la referencia `g.__ckPosDb`)
+ * para que cualquier variable que ya haya capturado `getDb()` en este mismo
+ * request siga apuntando al objeto correcto. Si Redis no esta configurado o
+ * falla, seguimos con lo que haya en memoria: nunca debe romper la request.
+ */
+export async function hidratarDb(): Promise<Db> {
+  const db = getDb();
+  const redis = obtenerClienteRedis();
+  if (!redis) return db;
+  try {
+    const datos = await redis.get<Db>(CLAVE_REDIS);
+    if (datos && typeof datos === "object") {
+      for (const clave of Object.keys(datos) as (keyof Db)[]) {
+        (db as any)[clave] = (datos as any)[clave];
+      }
+    }
+  } catch {
+    // Redis no disponible: seguimos con el estado en memoria que haya.
+  }
+  return db;
+}
+
+/** Persiste el estado actual del singleton a Redis. Nunca lanza. */
+export async function persistirDb(): Promise<void> {
+  const redis = obtenerClienteRedis();
+  if (!redis) return;
+  try {
+    await redis.set(CLAVE_REDIS, getDb());
+  } catch {
+    // No bloqueamos la respuesta de la API si Redis falla al guardar.
+  }
+}
+
+/** Borra la copia persistida en Redis (usado por resetDb()). Nunca lanza. */
+async function borrarDbEnRedis(): Promise<void> {
+  const redis = obtenerClienteRedis();
+  if (!redis) return;
+  try {
+    await redis.del(CLAVE_REDIS);
+  } catch {
+    // Ignoramos: el proximo cold start arranca igual con el estado sembrado.
+  }
+}
+
+/**
+ * Envuelve el cuerpo de un handler de ruta API: hidrata el singleton desde
+ * Redis antes de ejecutar el handler (logica de negocio SINCRONA existente,
+ * sin cambios) y persiste el resultado a Redis despues, incluso si el handler
+ * lanza (para no perder escrituras parciales intencionales; si el handler
+ * lanza antes de mutar nada, persistir de todas formas es una operacion
+ * idempotente y no causa dano).
+ */
+export async function conPersistencia<T>(fn: () => Promise<T> | T): Promise<T> {
+  await hidratarDb();
+  try {
+    return await fn();
+  } finally {
+    await persistirDb();
+  }
 }
 
 /** Devuelve el turno abierto de una ubicacion (o el primero abierto). */

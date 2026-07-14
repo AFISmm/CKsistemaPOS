@@ -1,6 +1,8 @@
 import { marcarPorFacial, type MarcarPorFacialInput } from "@/lib/jornada/marcaje";
 import { respuestaErrorJornada } from "@/lib/jornada/http";
 
+import { conPersistencia } from "@/lib/db/store";
+
 export const dynamic = "force-dynamic";
 
 /**
@@ -13,21 +15,23 @@ export const dynamic = "force-dynamic";
  * `metodoVerificacion="facial"` (ver lib/jornada/marcaje.ts).
  */
 export async function POST(request: Request) {
-  try {
-    const body = (await request.json().catch(() => ({}))) as Partial<MarcarPorFacialInput>;
-    if (!body.empleadoId || !body.tipo || !body.codigo) {
-      return Response.json(
-        { codigo: "campos_requeridos", mensaje: "empleadoId, tipo y codigo son requeridos" },
-        { status: 422 }
-      );
+  return conPersistencia(async () => {
+    try {
+      const body = (await request.json().catch(() => ({}))) as Partial<MarcarPorFacialInput>;
+      if (!body.empleadoId || !body.tipo || !body.codigo) {
+        return Response.json(
+          { codigo: "campos_requeridos", mensaje: "empleadoId, tipo y codigo son requeridos" },
+          { status: 422 }
+        );
+      }
+      const marcaje = marcarPorFacial({
+        empleadoId: body.empleadoId,
+        tipo: body.tipo,
+        codigo: body.codigo,
+      });
+      return Response.json({ marcaje }, { status: 201 });
+    } catch (e) {
+      return respuestaErrorJornada(e);
     }
-    const marcaje = marcarPorFacial({
-      empleadoId: body.empleadoId,
-      tipo: body.tipo,
-      codigo: body.codigo,
-    });
-    return Response.json({ marcaje }, { status: 201 });
-  } catch (e) {
-    return respuestaErrorJornada(e);
-  }
+  });
 }

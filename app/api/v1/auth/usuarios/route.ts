@@ -1,6 +1,8 @@
 import { listarUsuarios } from "@/lib/auth/autenticacion";
 import { respuestaErrorAuth } from "@/lib/auth/http";
 
+import { conPersistencia } from "@/lib/db/store";
+
 export const dynamic = "force-dynamic";
 
 /**
@@ -12,10 +14,12 @@ export const dynamic = "force-dynamic";
  * antes de tocar este endpoint.
  */
 export async function GET() {
-  try {
-    const usuarios = listarUsuarios();
-    return Response.json({ usuarios });
-  } catch (e) {
-    return respuestaErrorAuth(e);
-  }
+  return conPersistencia(async () => {
+    try {
+      const usuarios = listarUsuarios();
+      return Response.json({ usuarios });
+    } catch (e) {
+      return respuestaErrorAuth(e);
+    }
+  });
 }

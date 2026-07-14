@@ -27,6 +27,8 @@ import { ErrorPago, procesarPago } from "@/lib/payments/pagos";
 import type { EntradaPago } from "@/lib/payments/pagos";
 import type { MetodoPago } from "@/lib/domain/types";
 
+import { conPersistencia } from "@/lib/db/store";
+
 export const dynamic = "force-dynamic";
 
 interface CuerpoPagoRequest {
@@ -45,67 +47,69 @@ function errorJson(codigo: string, mensaje: string, status: number) {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  let cuerpo: CuerpoPagoRequest;
-  try {
-    cuerpo = (await request.json()) as CuerpoPagoRequest;
-  } catch {
-    return errorJson("CUERPO_INVALIDO", "el body debe ser JSON valido", 400);
-  }
+  return conPersistencia(async () => {
+    let cuerpo: CuerpoPagoRequest;
+    try {
+      cuerpo = (await request.json()) as CuerpoPagoRequest;
+    } catch {
+      return errorJson("CUERPO_INVALIDO", "el body debe ser JSON valido", 400);
+    }
 
-  const { pedidoId, metodo, monto, propina, montoRecibido, offline, forzarRechazo, usuarioId } =
-    cuerpo;
+    const { pedidoId, metodo, monto, propina, montoRecibido, offline, forzarRechazo, usuarioId } =
+      cuerpo;
 
-  if (typeof pedidoId !== "string" || pedidoId.length === 0) {
-    return errorJson("PEDIDO_ID_REQUERIDO", "pedidoId es requerido", 422);
-  }
-  if (metodo !== "efectivo" && metodo !== "tarjeta") {
-    return errorJson(
-      "METODO_INVALIDO",
-      'metodo debe ser "efectivo" o "tarjeta" (este endpoint no procesa "otro")',
-      422
-    );
-  }
-  if (typeof monto !== "number") {
-    return errorJson("MONTO_REQUERIDO", "monto (centavos, entero) es requerido", 422);
-  }
-
-  const metodoPago = metodo as Extract<MetodoPago, "efectivo" | "tarjeta">;
-
-  let entrada: EntradaPago;
-  if (metodoPago === "efectivo") {
-    if (typeof montoRecibido !== "number") {
+    if (typeof pedidoId !== "string" || pedidoId.length === 0) {
+      return errorJson("PEDIDO_ID_REQUERIDO", "pedidoId es requerido", 422);
+    }
+    if (metodo !== "efectivo" && metodo !== "tarjeta") {
       return errorJson(
-        "MONTO_RECIBIDO_REQUERIDO",
-        "montoRecibido (centavos, entero) es requerido para pagos en efectivo",
+        "METODO_INVALIDO",
+        'metodo debe ser "efectivo" o "tarjeta" (este endpoint no procesa "otro")',
         422
       );
     }
-    entrada = {
-      metodo: "efectivo",
-      monto,
-      propina: typeof propina === "number" ? propina : undefined,
-      montoRecibido,
-      usuarioId: typeof usuarioId === "string" ? usuarioId : null,
-    };
-  } else {
-    entrada = {
-      metodo: "tarjeta",
-      monto,
-      propina: typeof propina === "number" ? propina : undefined,
-      offline: typeof offline === "boolean" ? offline : undefined,
-      forzarRechazo: typeof forzarRechazo === "boolean" ? forzarRechazo : undefined,
-      usuarioId: typeof usuarioId === "string" ? usuarioId : null,
-    };
-  }
-
-  try {
-    const resultado = procesarPago(pedidoId, entrada);
-    return Response.json(resultado, { status: 201 });
-  } catch (err) {
-    if (err instanceof ErrorPago) {
-      return errorJson(err.codigo, err.message, err.status);
+    if (typeof monto !== "number") {
+      return errorJson("MONTO_REQUERIDO", "monto (centavos, entero) es requerido", 422);
     }
-    const mensaje = err instanceof Error ? err.message : "error desconocido";
-    return errorJson("ERROR_INTERNO", mensaje, 500);
-  }
+
+    const metodoPago = metodo as Extract<MetodoPago, "efectivo" | "tarjeta">;
+
+    let entrada: EntradaPago;
+    if (metodoPago === "efectivo") {
+      if (typeof montoRecibido !== "number") {
+        return errorJson(
+          "MONTO_RECIBIDO_REQUERIDO",
+          "montoRecibido (centavos, entero) es requerido para pagos en efectivo",
+          422
+        );
+      }
+      entrada = {
+        metodo: "efectivo",
+        monto,
+        propina: typeof propina === "number" ? propina : undefined,
+        montoRecibido,
+        usuarioId: typeof usuarioId === "string" ? usuarioId : null,
+      };
+    } else {
+      entrada = {
+        metodo: "tarjeta",
+        monto,
+        propina: typeof propina === "number" ? propina : undefined,
+        offline: typeof offline === "boolean" ? offline : undefined,
+        forzarRechazo: typeof forzarRechazo === "boolean" ? forzarRechazo : undefined,
+        usuarioId: typeof usuarioId === "string" ? usuarioId : null,
+      };
+    }
+
+    try {
+      const resultado = procesarPago(pedidoId, entrada);
+      return Response.json(resultado, { status: 201 });
+    } catch (err) {
+      if (err instanceof ErrorPago) {
+        return errorJson(err.codigo, err.message, err.status);
+      }
+      const mensaje = err instanceof Error ? err.message : "error desconocido";
+      return errorJson("ERROR_INTERNO", mensaje, 500);
+    }
+  });
 }

@@ -1,6 +1,8 @@
 import { obtenerSesion } from "@/lib/auth/autenticacion";
 import { respuestaErrorAuth } from "@/lib/auth/http";
 
+import { conPersistencia } from "@/lib/db/store";
+
 export const dynamic = "force-dynamic";
 
 /**
@@ -9,18 +11,20 @@ export const dynamic = "force-dynamic";
  * lib/shell/SesionProvider.tsx).
  */
 export async function GET(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const usuarioId = searchParams.get("usuarioId");
-    if (!usuarioId) {
-      return Response.json(
-        { codigo: "usuarioId_requerido", mensaje: "Falta el parametro usuarioId." },
-        { status: 400 }
-      );
+  return conPersistencia(async () => {
+    try {
+      const { searchParams } = new URL(request.url);
+      const usuarioId = searchParams.get("usuarioId");
+      if (!usuarioId) {
+        return Response.json(
+          { codigo: "usuarioId_requerido", mensaje: "Falta el parametro usuarioId." },
+          { status: 400 }
+        );
+      }
+      const { usuario, rol } = obtenerSesion(usuarioId);
+      return Response.json({ usuario, rol });
+    } catch (e) {
+      return respuestaErrorAuth(e);
     }
-    const { usuario, rol } = obtenerSesion(usuarioId);
-    return Response.json({ usuario, rol });
-  } catch (e) {
-    return respuestaErrorAuth(e);
-  }
+  });
 }

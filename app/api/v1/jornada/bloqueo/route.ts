@@ -1,6 +1,8 @@
 import { consultarBloqueo } from "@/lib/jornada/marcaje";
 import { respuestaErrorJornada } from "@/lib/jornada/http";
 
+import { conPersistencia } from "@/lib/db/store";
+
 export const dynamic = "force-dynamic";
 
 /**
@@ -10,17 +12,19 @@ export const dynamic = "force-dynamic";
  * de depender solo del conteo en memoria del cliente.
  */
 export async function GET(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const empleadoId = searchParams.get("empleadoId");
-    if (!empleadoId) {
-      return Response.json(
-        { codigo: "empleadoId_requerido", mensaje: "empleadoId es requerido" },
-        { status: 400 }
-      );
+  return conPersistencia(async () => {
+    try {
+      const { searchParams } = new URL(request.url);
+      const empleadoId = searchParams.get("empleadoId");
+      if (!empleadoId) {
+        return Response.json(
+          { codigo: "empleadoId_requerido", mensaje: "empleadoId es requerido" },
+          { status: 400 }
+        );
+      }
+      return Response.json(consultarBloqueo(empleadoId));
+    } catch (e) {
+      return respuestaErrorJornada(e);
     }
-    return Response.json(consultarBloqueo(empleadoId));
-  } catch (e) {
-    return respuestaErrorJornada(e);
-  }
+  });
 }

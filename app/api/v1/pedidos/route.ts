@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db/store";
+import { conPersistencia, getDb } from "@/lib/db/store";
 import type { EstadoPedido } from "@/lib/domain/types";
 import { crearPedido, type NuevoPedidoInput } from "@/lib/sales/engine";
 import { respuestaError } from "@/lib/sales/http";
@@ -28,38 +28,42 @@ const ESTADOS_HISTORIAL: EstadoPedido[] = ["entregado", "cobrado"];
 
 /** GET /api/v1/pedidos?estado=<estado|cocina|historial>&turnoId=<id> */
 export async function GET(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const estado = searchParams.get("estado");
-    const turnoId = searchParams.get("turnoId");
+  return conPersistencia(async () => {
+    try {
+      const { searchParams } = new URL(request.url);
+      const estado = searchParams.get("estado");
+      const turnoId = searchParams.get("turnoId");
 
-    let pedidos = getDb().pedidos;
+      let pedidos = getDb().pedidos;
 
-    if (estado === "cocina") {
-      pedidos = pedidos.filter((p) => ESTADOS_COCINA.includes(p.estado));
-    } else if (estado === "historial") {
-      pedidos = pedidos.filter((p) => ESTADOS_HISTORIAL.includes(p.estado));
-    } else if (estado) {
-      pedidos = pedidos.filter((p) => p.estado === estado);
+      if (estado === "cocina") {
+        pedidos = pedidos.filter((p) => ESTADOS_COCINA.includes(p.estado));
+      } else if (estado === "historial") {
+        pedidos = pedidos.filter((p) => ESTADOS_HISTORIAL.includes(p.estado));
+      } else if (estado) {
+        pedidos = pedidos.filter((p) => p.estado === estado);
+      }
+
+      if (turnoId) {
+        pedidos = pedidos.filter((p) => p.turnoId === turnoId);
+      }
+
+      return Response.json({ pedidos });
+    } catch (e) {
+      return respuestaError(e);
     }
-
-    if (turnoId) {
-      pedidos = pedidos.filter((p) => p.turnoId === turnoId);
-    }
-
-    return Response.json({ pedidos });
-  } catch (e) {
-    return respuestaError(e);
-  }
+  });
 }
 
 /** POST /api/v1/pedidos — crea un pedido en el turno abierto de la ubicacion. */
 export async function POST(request: Request) {
-  try {
-    const body = (await request.json().catch(() => ({}))) as NuevoPedidoInput;
-    const pedido = crearPedido(body);
-    return Response.json({ pedido }, { status: 201 });
-  } catch (e) {
-    return respuestaError(e);
-  }
+  return conPersistencia(async () => {
+    try {
+      const body = (await request.json().catch(() => ({}))) as NuevoPedidoInput;
+      const pedido = crearPedido(body);
+      return Response.json({ pedido }, { status: 201 });
+    } catch (e) {
+      return respuestaError(e);
+    }
+  });
 }

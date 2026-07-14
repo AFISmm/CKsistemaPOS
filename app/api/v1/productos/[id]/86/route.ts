@@ -4,7 +4,7 @@
  * Marca/desmarca 86 (agotado) un producto. Body: { disponible: boolean, usuarioId?: string }.
  */
 
-import { getDb } from "@/lib/db/store";
+import { conPersistencia, getDb } from "@/lib/db/store";
 import { marcar86 } from "@/lib/inventory/inventario";
 
 export const dynamic = "force-dynamic";
@@ -18,32 +18,34 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> }
 ): Promise<Response> {
-  const { id } = await context.params;
+  return conPersistencia(async () => {
+    const { id } = await context.params;
 
-  let body: Body86;
-  try {
-    body = (await request.json()) as Body86;
-  } catch {
-    return Response.json(
-      { error: "Body invalido: se espera JSON { disponible: boolean, usuarioId?: string }" },
-      { status: 400 }
-    );
-  }
+    let body: Body86;
+    try {
+      body = (await request.json()) as Body86;
+    } catch {
+      return Response.json(
+        { error: "Body invalido: se espera JSON { disponible: boolean, usuarioId?: string }" },
+        { status: 400 }
+      );
+    }
 
-  if (typeof body.disponible !== "boolean") {
-    return Response.json(
-      { error: "Campo 'disponible' (boolean) es requerido" },
-      { status: 400 }
-    );
-  }
+    if (typeof body.disponible !== "boolean") {
+      return Response.json(
+        { error: "Campo 'disponible' (boolean) es requerido" },
+        { status: 400 }
+      );
+    }
 
-  try {
-    marcar86(id, body.disponible, body.usuarioId ?? "sistema");
-  } catch (err) {
-    const mensaje = err instanceof Error ? err.message : "Error desconocido";
-    return Response.json({ error: mensaje }, { status: 404 });
-  }
+    try {
+      marcar86(id, body.disponible, body.usuarioId ?? "sistema");
+    } catch (err) {
+      const mensaje = err instanceof Error ? err.message : "Error desconocido";
+      return Response.json({ error: mensaje }, { status: 404 });
+    }
 
-  const producto = getDb().productos.find((p) => p.id === id);
-  return Response.json({ producto });
+    const producto = getDb().productos.find((p) => p.id === id);
+    return Response.json({ producto });
+  });
 }

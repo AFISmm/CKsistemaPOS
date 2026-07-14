@@ -9,23 +9,29 @@ import { ErrorDominio } from "@/lib/sales/errores";
 import { respuestaError } from "@/lib/sales/http";
 import { getModoOffline, setModoOffline } from "@/lib/sales/offlineState";
 
+import { conPersistencia } from "@/lib/db/store";
+
 export const dynamic = "force-dynamic";
 
 /** GET /api/v1/offline — consulta el estado actual del flag. */
 export async function GET() {
-  return Response.json({ activo: getModoOffline() });
+  return conPersistencia(async () => {
+    return Response.json({ activo: getModoOffline() });
+  });
 }
 
 /** POST /api/v1/offline — {activo:boolean}. */
 export async function POST(request: Request) {
-  try {
-    const body = (await request.json().catch(() => null)) as { activo?: boolean } | null;
-    if (!body || typeof body.activo !== "boolean") {
-      throw new ErrorDominio("cuerpo_invalido", "Se requiere activo (boolean)", 422);
+  return conPersistencia(async () => {
+    try {
+      const body = (await request.json().catch(() => null)) as { activo?: boolean } | null;
+      if (!body || typeof body.activo !== "boolean") {
+        throw new ErrorDominio("cuerpo_invalido", "Se requiere activo (boolean)", 422);
+      }
+      setModoOffline(body.activo);
+      return Response.json({ activo: getModoOffline() });
+    } catch (e) {
+      return respuestaError(e);
     }
-    setModoOffline(body.activo);
-    return Response.json({ activo: getModoOffline() });
-  } catch (e) {
-    return respuestaError(e);
-  }
+  });
 }
