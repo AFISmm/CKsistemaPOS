@@ -114,6 +114,66 @@ export async function reportarIntentoFacial(
   });
 }
 
+// ---- WebAuthn (Face ID/Touch ID/Windows Hello REAL), refuerzo de la
+// verificacion facial simulada — ver lib/jornada/webauthn.ts para el detalle
+// de que es real (el gesto biometrico, exigido por el navegador/SO) y que se
+// simplifica a proposito en esta demo (verificacion criptografica de firma
+// server-side, fuera de alcance). Estas funciones SOLO arman/envian datos;
+// quien dispara el prompt biometrico es navigator.credentials.create()/.get()
+// en app/jornada/marcar/page.tsx.
+
+export interface OpcionesRegistroWebauthn {
+  challenge: string; // base64url
+  rp: { name: string };
+  user: { id: string; name: string; displayName: string }; // id en base64url
+  pubKeyCredParams: { alg: number; type: "public-key" }[];
+  authenticatorSelection: { authenticatorAttachment: "platform"; userVerification: "required" };
+  timeout: number;
+}
+
+/** Opciones para navigator.credentials.create() (primer registro de biometria en este dispositivo). */
+export async function obtenerOpcionesRegistroWebauthn(
+  empleadoId: string
+): Promise<OpcionesRegistroWebauthn> {
+  return solicitar<OpcionesRegistroWebauthn>("/jornada/webauthn/opciones-registro", {
+    method: "POST",
+    body: JSON.stringify({ empleadoId }),
+  });
+}
+
+/** Guarda el credentialId devuelto por create(), tras un gesto biometrico exitoso. */
+export async function registrarCredencialWebauthn(
+  empleadoId: string,
+  credentialId: string
+): Promise<{ credencialWebauthnId: string }> {
+  return solicitar("/jornada/webauthn/registrar", {
+    method: "POST",
+    body: JSON.stringify({ empleadoId, credentialId }),
+  });
+}
+
+export interface OpcionesLoginWebauthn {
+  challenge: string; // base64url
+  allowCredentials: { id: string; type: "public-key" }[]; // id en base64url
+  userVerification: "required";
+  timeout: number;
+}
+
+/**
+ * Opciones para navigator.credentials.get() (usos posteriores, credencial ya
+ * registrada). Si el empleado no tiene credencial, el servidor responde 422
+ * con codigo "sin_credencial_webauthn" (ErrorApi) para que el llamador caiga
+ * al flujo de registro.
+ */
+export async function obtenerOpcionesLoginWebauthn(
+  empleadoId: string
+): Promise<OpcionesLoginWebauthn> {
+  return solicitar<OpcionesLoginWebauthn>("/jornada/webauthn/opciones-login", {
+    method: "POST",
+    body: JSON.stringify({ empleadoId }),
+  });
+}
+
 export interface MarcarPorFacialBody {
   empleadoId: string;
   tipo: "entrada" | "salida";

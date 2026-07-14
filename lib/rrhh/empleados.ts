@@ -90,6 +90,10 @@ export function crearEmpleado(input: NuevoEmpleadoInput): Empleado {
     usuarioId: null,
     motivoBaja: null,
     ssnUltimos4: input.ssnUltimos4 ?? null,
+    // Sin credencial de WebAuthn (Face ID/Touch ID/Windows Hello) todavia: se
+    // registra la primera vez que el empleado usa el boton biometrico real en
+    // /jornada/marcar (ver lib/jornada/webauthn.ts).
+    credencialWebauthnId: null,
     creadoEn: ahora(),
   };
 
@@ -108,13 +112,31 @@ export function crearEmpleado(input: NuevoEmpleadoInput): Empleado {
   return empleado;
 }
 
-export function listarEmpleados(filtro: { ubicacionId?: string; estado?: EstadoEmpleado } = {}): Empleado[] {
+/**
+ * `excluirRolId`: excluye del resultado los empleados con ese rolId. Uso
+ * previsto: ocultar las cuentas @digeniusai.com (rol-developer, ver
+ * lib/db/store.ts `ROL_DEVELOPER_ID`) de las listas operativas de la tienda
+ * (/empleados, /nomina, "Gestionar perfiles") — son cuentas de administracion
+ * del sistema, no personal de tienda (decision de producto). Filtro
+ * deliberadamente generico (no atado a "developer" en el nombre) para que
+ * `listarEmpleados` siga siendo reutilizable; quien decide EL id concreto a
+ * excluir es el llamador (ver app/api/v1/empleados/route.ts,
+ * `excluirDevelopers=true`). NO afecta a `obtenerEmpleadoPorEmail`, usado por
+ * el flujo de login/auto-registro: esa funcion sigue encontrando empleados
+ * developer con normalidad.
+ */
+export function listarEmpleados(
+  filtro: { ubicacionId?: string; estado?: EstadoEmpleado; excluirRolId?: string } = {}
+): Empleado[] {
   let empleados = getDb().empleados;
   if (filtro.ubicacionId) {
     empleados = empleados.filter((e) => e.ubicacionId === filtro.ubicacionId);
   }
   if (filtro.estado) {
     empleados = empleados.filter((e) => e.estado === filtro.estado);
+  }
+  if (filtro.excluirRolId) {
+    empleados = empleados.filter((e) => e.rolId !== filtro.excluirRolId);
   }
   return empleados;
 }
@@ -134,6 +156,20 @@ export function obtenerEmpleadoPorEmail(email: string): Empleado | undefined {
   const normalizado = (email ?? "").trim().toLowerCase();
   if (!normalizado) return undefined;
   return getDb().empleados.find((e) => e.email.trim().toLowerCase() === normalizado);
+}
+
+/**
+ * Busca el Empleado vinculado a un Usuario de login por su `usuarioId`
+ * (relacion inversa a `Empleado.usuarioId`). Usado por el modulo "Mi Perfil"
+ * (ver app/mi-perfil/page.tsx) para que CUALQUIER usuario logueado pueda
+ * resolver su propio Empleado a partir de `useSesion().usuarioActual.id` y
+ * editar sus propios datos, sin depender del permiso "usuarios.gestionar"
+ * que usa "Gestionar perfiles" para administrar A OTROS.
+ */
+export function obtenerEmpleadoPorUsuarioId(usuarioId: string): Empleado | undefined {
+  const normalizado = (usuarioId ?? "").trim();
+  if (!normalizado) return undefined;
+  return getDb().empleados.find((e) => e.usuarioId === normalizado);
 }
 
 function obtenerEmpleadoOrThrow(empleadoId: string): Empleado {
@@ -215,7 +251,19 @@ export function editarEmpleado(empleadoId: string, cambios: EditarEmpleadoInput)
 
   const rolAnterior = empleado.rolId;
 
-  if (cambios.nombre !== undefined) empleado.nombre = cambios.nombre.trim();
+  if (cambios.nombre !== undefined) {
+    empleado.nombre = cambios.nombre.trim();
+    // Mantener sincronizado el nombre del Usuario de login (si existe): sin
+    // esto, el saludo del Topbar (usuarioActual.nombre, resuelto por
+    // lib/auth/autenticacion.ts a partir de Usuario, NO de Empleado) se
+    // quedaba desactualizado tras editar el nombre desde aqui (ej. "Mi
+    // Perfil" o "Gestionar perfiles"). Mismo objeto de getDb().usuarios que
+    // consume el resto de la app (login/sesion).
+    if (empleado.usuarioId) {
+      const usuario = getDb().usuarios.find((u) => u.id === empleado.usuarioId);
+      if (usuario) usuario.nombre = empleado.nombre;
+    }
+  }
   if (cambios.email !== undefined) empleado.email = cambios.email.trim();
   if (cambios.telefono !== undefined) empleado.telefono = cambios.telefono.trim();
   if (cambios.ubicacionId !== undefined) {

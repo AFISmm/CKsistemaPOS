@@ -36,12 +36,11 @@
  */
 
 import { completarOnboarding, crearEmpleado, obtenerEmpleadoPorEmail } from "../rrhh/empleados";
+import { ROL_DEVELOPER_ID } from "../db/store";
 import type { Empleado } from "../domain/types";
 import { ErrorAuth } from "./errores";
 
 const ROL_DEFAULT_AUTOREGISTRO = "rol-cajero";
-/** Rol de las cuentas @digeniusai.com: acceso total, ver lib/db/store.ts. */
-const ROL_DEVELOPER = "rol-developer";
 // $14.00/hr DEMO — el gerente lo ajusta despues desde Empleados/Gestionar Perfiles.
 // (Irrelevante para cuentas developer, que no cobran nomina real, pero
 // crearEmpleado exige el campo; se deja el mismo default por simplicidad.)
@@ -132,7 +131,7 @@ export function registrarEmpleado(input: RegistroInput): Empleado {
     nombre: `${nombre} ${apellido}`.trim(),
     email,
     telefono,
-    rolId: esDeveloper ? ROL_DEVELOPER : ROL_DEFAULT_AUTOREGISTRO,
+    rolId: esDeveloper ? ROL_DEVELOPER_ID : ROL_DEFAULT_AUTOREGISTRO,
     // ubicacionId: se omite a proposito -> default de crearEmpleado (tienda piloto).
     tarifaHoraCentavos: TARIFA_DEFAULT_CENTAVOS,
     ssnUltimos4: esDeveloper ? (ssnUltimos4 || null) : ssnUltimos4,

@@ -90,6 +90,17 @@ export function ahora(): string {
 /** ID canonico de la tienda piloto demo (Miami, FL). */
 export const UBICACION_PILOTO_ID = "ubic-miami-fl";
 
+/**
+ * ID canonico del rol "developer" (cuentas @digeniusai.com, acceso total —
+ * ver PERMISOS_GERENCIALES/sembrar() abajo y lib/auth/registro.ts). Se
+ * exporta como constante para que ningun consumidor (server-side) tenga que
+ * repetir el string literal "rol-developer" sin contexto. Usado, entre otros,
+ * por GET /api/v1/empleados (excluirDevelopers=true) para que las cuentas de
+ * administracion del sistema no aparezcan en las listas operativas de la
+ * tienda (/empleados, /nomina, /perfiles).
+ */
+export const ROL_DEVELOPER_ID = "rol-developer";
+
 function crearDbVacia(): Db {
   return {
     ubicaciones: [],
@@ -210,6 +221,14 @@ function sembrar(db: Db): void {
     // seguridad/gerencial, no de mostrador ni cocina. Ver
     // components/shell/Sidebar.tsx y components/shell/GestionarPerfilesModal.tsx.
     "usuarios.gestionar",
+    // Permiso para el modulo "Gestion de Menu" del sidebar (/menu, owner:
+    // menu-inventario-pos). El dueno de producto pidio explicitamente que el
+    // perfil de desarrollador (y por extension gerente de tienda, via esta
+    // misma constante) pueda agregar platos nuevos al catalogo. No existia un
+    // permiso RBAC natural para "administrar el catalogo/menu" en el MVP; se
+    // agrega aqui con el mismo criterio que reportes.ver/empleados.gestionar/
+    // nomina.ver: es una operacion gerencial, no de mostrador ni cocina.
+    "menu.gestionar",
   ];
 
   db.roles.push(
@@ -238,7 +257,7 @@ function sembrar(db: Db): void {
       // informacion operativa. Mismos permisos que gerente de tienda hoy
       // (es el techo de acceso ya modelado en este MVP); si se agregan
       // permisos nuevos en el futuro, deberian otorgarse aqui tambien.
-      id: "rol-developer",
+      id: ROL_DEVELOPER_ID,
       nombre: "developer",
       permisos: PERMISOS_GERENCIALES,
     }

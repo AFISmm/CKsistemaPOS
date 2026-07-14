@@ -106,6 +106,18 @@ export interface Empleado {
    * (ver nota de cumplimiento en README-DEMO.md).
    */
   ssnUltimos4: string | null;
+  /**
+   * AGREGADO EN ETAPA 2, refuerzo de verificacion facial (ver lib/jornada/webauthn.ts):
+   * id (base64url) de la credencial de WebAuthn (Face ID / Touch ID / Windows
+   * Hello) registrada para ESTE empleado en el ULTIMO dispositivo desde el que
+   * se registro. Modelo simplificado de demo: solo UNA credencial por
+   * empleado (no un array de credenciales por dispositivo, como haria un
+   * sistema WebAuthn completo) — registrar de nuevo desde otro dispositivo
+   * simplemente reemplaza esta credencial. `null` = el empleado todavia no
+   * registro Face ID/Touch ID en ningun dispositivo (usa los botones de
+   * simulacion, ver app/jornada/marcar/page.tsx).
+   */
+  credencialWebauthnId: string | null;
   creadoEn: string;
 }
 

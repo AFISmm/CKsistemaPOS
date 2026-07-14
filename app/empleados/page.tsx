@@ -77,7 +77,10 @@ export default function EmpleadosPage() {
       const lunes = lunesDeSemanaActual();
       const domingo = domingoDeSemana(lunes);
       const [emps, rolesData, ubicacionesData, marcajes, horarios] = await Promise.all([
-        listarEmpleados(),
+        // excluirDevelopers: las cuentas @digeniusai.com son de administracion
+        // del sistema, no personal de tienda (ver decision de producto
+        // documentada en lib/db/store.ts `ROL_DEVELOPER_ID`).
+        listarEmpleados({ excluirDevelopers: true }),
         listarRoles(),
         listarUbicaciones(),
         listarMarcajes({}),

@@ -8,14 +8,19 @@
  * Exenta del guard de sesion del shell (ver components/shell/AppShell.tsx):
  * se abre desde el celular PERSONAL del empleado, que normalmente no tiene
  * la sesion PIN de la tienda. La identidad/presencia aqui se prueban con
- * verificacion facial simulada + codigo TOTP de la pantalla central
+ * verificacion facial (real via WebAuthn si el dispositivo lo soporta, o
+ * simulada como fallback) + codigo TOTP de la pantalla central
  * (/jornada/pantalla), no con el login del shell.
  *
- * Pasos: (1) elegir empleado + entrada/salida -> (2) verificacion facial
- * SIMULADA (mock, dos botones "exitosa"/"fallida" para poder DEMOSTRAR el
- * flujo de fallo/bloqueo; 3 fallos consecutivos bloquean el metodo facial 5
- * minutos, con PIN de respaldo como plan B) -> (3) codigo TOTP de 6 digitos
- * de la pantalla central -> confirmacion.
+ * Pasos: (1) elegir empleado + entrada/salida -> (2) verificacion facial:
+ * REFORZADA con biometria REAL del dispositivo (Face ID/Touch ID/Windows
+ * Hello via Web Authentication API, ver lib/jornada/webauthn.ts) cuando el
+ * navegador la soporta; los dos botones "Simular exito/fallo" (mock) quedan
+ * como PLAN B explicito para dispositivos sin autenticador de plataforma y
+ * para poder seguir probando el flujo de fallo/bloqueo por curl/testing (3
+ * fallos consecutivos bloquean el metodo facial 5 minutos, con PIN de
+ * respaldo como plan B) -> (3) codigo TOTP de 6 digitos de la pantalla
+ * central -> confirmacion.
  */
 
 import { useEffect, useState } from "react";
@@ -31,8 +36,25 @@ import {
   listarEmpleadosActivos,
   marcarPorFacial,
   marcarPorPinRespaldo,
+  obtenerOpcionesLoginWebauthn,
+  obtenerOpcionesRegistroWebauthn,
+  registrarCredencialWebauthn,
   reportarIntentoFacial,
 } from "@/components/jornada/api";
+
+/**
+ * Decodifica un string base64url (formato que usan las opciones de WebAuthn
+ * que devuelve el servidor) a un ArrayBuffer, tal como lo exige la Web
+ * Authentication API del navegador (challenge, user.id, allowCredentials[].id).
+ */
+function base64UrlABuffer(base64url: string): ArrayBuffer {
+  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+  const relleno = base64.length % 4 === 0 ? "" : "=".repeat(4 - (base64.length % 4));
+  const binario = atob(base64 + relleno);
+  const bytes = new Uint8Array(binario.length);
+  for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
+  return bytes.buffer;
+}
 
 type Paso = "seleccion" | "facial" | "codigo" | "pinRespaldo" | "confirmado";
 
@@ -66,6 +88,13 @@ export default function MarcarJornadaPage() {
   const [error, setError] = useState<string | null>(null);
   const [marcaje, setMarcaje] = useState<Marcaje | null>(null);
 
+  // Soporte de autenticador de plataforma (Face ID/Touch ID/Windows Hello)
+  // del dispositivo actual. null = todavia detectando; true/false = resultado.
+  // Se detecta UNA vez al montar la pantalla (no depende del empleado elegido:
+  // es una capacidad del dispositivo/navegador, no de la cuenta).
+  const [soporteBiometrico, setSoporteBiometrico] = useState<boolean | null>(null);
+  const [procesandoBiometria, setProcesandoBiometria] = useState(false);
+
   useEffect(() => {
     let vivo = true;
     listarEmpleadosActivos()
@@ -86,6 +115,34 @@ export default function MarcarJornadaPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [usuarioActual]);
+
+  // Deteccion de soporte de autenticador de plataforma (Face ID/Touch
+  // ID/Windows Hello). PublicKeyCredential solo existe en navegadores que
+  // implementan WebAuthn; isUserVerifyingPlatformAuthenticatorAvailable()
+  // confirma ademas que HAY un autenticador biometrico/PIN de plataforma
+  // disponible en este dispositivo especifico (ej. false en un desktop sin
+  // Windows Hello configurado, aunque el navegador soporte WebAuthn).
+  useEffect(() => {
+    let vivo = true;
+    async function detectarSoporte() {
+      try {
+        const PKC = (window as unknown as { PublicKeyCredential?: typeof PublicKeyCredential })
+          .PublicKeyCredential;
+        if (!PKC || typeof PKC.isUserVerifyingPlatformAuthenticatorAvailable !== "function") {
+          if (vivo) setSoporteBiometrico(false);
+          return;
+        }
+        const disponible = await PKC.isUserVerifyingPlatformAuthenticatorAvailable();
+        if (vivo) setSoporteBiometrico(disponible);
+      } catch {
+        if (vivo) setSoporteBiometrico(false);
+      }
+    }
+    detectarSoporte();
+    return () => {
+      vivo = false;
+    };
+  }, []);
 
   // Cuenta regresiva del bloqueo: solo UI, la fuente de verdad sigue siendo el servidor.
   useEffect(() => {
@@ -134,6 +191,78 @@ export default function MarcarJornadaPage() {
     } catch (err) {
       setError(textoErrorApi(err, t, "jornada.marcar.errorGenerico"));
     }
+  }
+
+  /**
+   * Verificacion facial REAL via WebAuthn: dispara el prompt biometrico
+   * nativo del dispositivo (Face ID/Touch ID/Windows Hello). Intenta primero
+   * `navigator.credentials.get()` (el empleado ya registro biometria en este
+   * dispositivo); si el servidor responde que no hay credencial registrada
+   * (codigo "sin_credencial_webauthn"), cae al flujo de registro
+   * (`navigator.credentials.create()`), que de una vez cuenta como
+   * verificacion exitosa para ESTA vez si el gesto biometrico se completa.
+   *
+   * Cualquiera que sea el resultado (exito, cancelado por el usuario, fallo
+   * del autenticador, etc.), termina llamando a `simularFacial(exitoso)` —
+   * el MISMO punto de integracion que usan los botones de simulacion — para
+   * reusar exactamente la misma logica de conteo de intentos/bloqueo de 5
+   * minutos/avance de paso que ya existia.
+   */
+  async function usarBiometriaReal() {
+    if (!empleadoId || procesandoBiometria) return;
+    setError(null);
+    setProcesandoBiometria(true);
+    let exitoso = false;
+    try {
+      try {
+        const opciones = await obtenerOpcionesLoginWebauthn(empleadoId);
+        await navigator.credentials.get({
+          publicKey: {
+            challenge: base64UrlABuffer(opciones.challenge),
+            allowCredentials: opciones.allowCredentials.map((c) => ({
+              id: base64UrlABuffer(c.id),
+              type: c.type,
+            })),
+            userVerification: opciones.userVerification,
+            timeout: opciones.timeout,
+          },
+        });
+        exitoso = true;
+      } catch (err) {
+        if (err instanceof ErrorApi && err.codigo === "sin_credencial_webauthn") {
+          // Este dispositivo/empleado todavia no tiene credencial registrada:
+          // registrar una nueva cuenta como verificacion exitosa de esta vez.
+          const opciones = await obtenerOpcionesRegistroWebauthn(empleadoId);
+          const credencial = await navigator.credentials.create({
+            publicKey: {
+              challenge: base64UrlABuffer(opciones.challenge),
+              rp: opciones.rp,
+              user: {
+                id: base64UrlABuffer(opciones.user.id),
+                name: opciones.user.name,
+                displayName: opciones.user.displayName,
+              },
+              pubKeyCredParams: opciones.pubKeyCredParams,
+              authenticatorSelection: opciones.authenticatorSelection,
+              timeout: opciones.timeout,
+            },
+          });
+          if (!credencial) throw new Error("sin_credencial_creada");
+          await registrarCredencialWebauthn(empleadoId, credencial.id);
+          exitoso = true;
+        } else {
+          throw err;
+        }
+      }
+    } catch {
+      // Cancelado por el usuario, gesto biometrico fallido, o cualquier otro
+      // error del navegador/red: se reporta como intento fallido REAL (misma
+      // consecuencia que "Simular verificacion fallida").
+      exitoso = false;
+    } finally {
+      setProcesandoBiometria(false);
+    }
+    await simularFacial(exitoso);
   }
 
   async function enviarCodigo() {
@@ -310,6 +439,28 @@ export default function MarcarJornadaPage() {
                       })}
                     </p>
                   )}
+
+                  {soporteBiometrico === true && (
+                    <button
+                      type="button"
+                      onClick={usarBiometriaReal}
+                      disabled={procesandoBiometria}
+                      className="min-h-[44px] w-full rounded-xl bg-ck-dark px-4 py-3 text-sm font-bold text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-ck-dark"
+                    >
+                      {procesandoBiometria
+                        ? t("jornada.marcar.biometriaProcesando")
+                        : t("jornada.marcar.usarBiometriaReal")}
+                    </button>
+                  )}
+                  {soporteBiometrico === false && (
+                    <p className="rounded-xl border border-neutral-200 bg-neutral-50 p-2 text-center text-xs text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-400">
+                      {t("jornada.marcar.biometriaNoSoportada")}
+                    </p>
+                  )}
+
+                  <p className="text-center text-xs text-neutral-500 dark:text-neutral-400">
+                    {t("jornada.marcar.simularAviso")}
+                  </p>
 
                   <button
                     type="button"

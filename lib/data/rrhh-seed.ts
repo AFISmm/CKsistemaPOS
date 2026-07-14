@@ -129,6 +129,10 @@ export function getSeedRrhh(): SeedRrhh {
     // Empleados semilla: dato anterior a esta feature, no aplica (ver
     // comentario de privacidad en lib/domain/types.ts Empleado.ssnUltimos4).
     ssnUltimos4: null,
+    // Sin credencial de WebAuthn (Face ID/Touch ID/Windows Hello) sembrada:
+    // se registra la primera vez que se use el boton biometrico real (ver
+    // lib/jornada/webauthn.ts).
+    credencialWebauthnId: null,
     creadoEn: "2024-03-15T09:00:00.000Z",
   };
 
@@ -147,6 +151,7 @@ export function getSeedRrhh(): SeedRrhh {
     // Empleados semilla: dato anterior a esta feature, no aplica (ver
     // comentario de privacidad en lib/domain/types.ts Empleado.ssnUltimos4).
     ssnUltimos4: null,
+    credencialWebauthnId: null,
     creadoEn: "2022-11-01T09:00:00.000Z",
   };
 
@@ -165,6 +170,7 @@ export function getSeedRrhh(): SeedRrhh {
     // Empleados semilla: dato anterior a esta feature, no aplica (ver
     // comentario de privacidad en lib/domain/types.ts Empleado.ssnUltimos4).
     ssnUltimos4: null,
+    credencialWebauthnId: null,
     creadoEn: "2023-06-20T09:00:00.000Z",
   };
 
@@ -183,6 +189,7 @@ export function getSeedRrhh(): SeedRrhh {
     // Empleados semilla: dato anterior a esta feature, no aplica (ver
     // comentario de privacidad en lib/domain/types.ts Empleado.ssnUltimos4).
     ssnUltimos4: null,
+    credencialWebauthnId: null,
     creadoEn: "2023-09-05T09:00:00.000Z",
   };
 
@@ -201,6 +208,7 @@ export function getSeedRrhh(): SeedRrhh {
     // Empleados semilla: dato anterior a esta feature, no aplica (ver
     // comentario de privacidad en lib/domain/types.ts Empleado.ssnUltimos4).
     ssnUltimos4: null,
+    credencialWebauthnId: null,
     creadoEn: "2024-01-10T09:00:00.000Z",
   };
 
@@ -220,6 +228,7 @@ export function getSeedRrhh(): SeedRrhh {
     // Empleados semilla: dato anterior a esta feature, no aplica (ver
     // comentario de privacidad en lib/domain/types.ts Empleado.ssnUltimos4).
     ssnUltimos4: null,
+    credencialWebauthnId: null,
     creadoEn: hoy.toISOString(),
   };
 

@@ -69,7 +69,10 @@ export default function GestionarPerfilesPage() {
       const lunes = lunesDeSemanaActual();
       const domingo = domingoDeSemana(lunes);
       const [empleadosData, usuariosData, rolesData, horariosData] = await Promise.all([
-        listarEmpleados(),
+        // excluirDevelopers: las cuentas @digeniusai.com se gestionan a si
+        // mismas desde "Mi Perfil" (app/mi-perfil/page.tsx), no desde aqui
+        // (ver decision de producto en lib/db/store.ts `ROL_DEVELOPER_ID`).
+        listarEmpleados({ excluirDevelopers: true }),
         listarUsuarios(),
         listarRoles(),
         listarHorarios({ desde: lunes, hasta: domingo }),

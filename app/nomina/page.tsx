@@ -43,7 +43,13 @@ export default function NominaPage() {
     setCargando(true);
     setError(null);
     try {
-      const [emps, recibosData] = await Promise.all([listarEmpleados(), listarRecibos()]);
+      // excluirDevelopers: las cuentas @digeniusai.com son de administracion
+      // del sistema, no personal de tienda con nomina real (ver decision de
+      // producto documentada en lib/db/store.ts `ROL_DEVELOPER_ID`).
+      const [emps, recibosData] = await Promise.all([
+        listarEmpleados({ excluirDevelopers: true }),
+        listarRecibos(),
+      ]);
       setEmpleados(emps);
       setRecibos(recibosData);
     } catch (err) {

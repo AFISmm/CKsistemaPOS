@@ -101,10 +101,22 @@ export interface EditarEmpleadoBody {
 export async function listarEmpleados(filtro?: {
   ubicacionId?: string;
   estado?: string;
+  /**
+   * Excluye del resultado las cuentas developer (rol-developer, ver
+   * lib/db/store.ts `ROL_DEVELOPER_ID`) — usado por las listas operativas de
+   * la tienda (/empleados, /nomina, "Gestionar perfiles"). El id del rol se
+   * resuelve server-side (GET /api/v1/empleados); este cliente nunca
+   * importa lib/db.
+   */
+  excluirDevelopers?: boolean;
+  /** Filtra por el Empleado vinculado a este usuarioId (0 o 1 resultado). Ver `obtenerEmpleadoPorUsuarioId` abajo. */
+  usuarioId?: string;
 }): Promise<Empleado[]> {
   const qs = new URLSearchParams();
   if (filtro?.ubicacionId) qs.set("ubicacionId", filtro.ubicacionId);
   if (filtro?.estado) qs.set("estado", filtro.estado);
+  if (filtro?.excluirDevelopers) qs.set("excluirDevelopers", "true");
+  if (filtro?.usuarioId) qs.set("usuarioId", filtro.usuarioId);
   const query = qs.toString();
   const { empleados } = await solicitar<{ empleados: Empleado[] }>(
     `/empleados${query ? `?${query}` : ""}`
@@ -115,6 +127,17 @@ export async function listarEmpleados(filtro?: {
 export async function obtenerEmpleado(id: string): Promise<Empleado> {
   const { empleado } = await solicitar<{ empleado: Empleado }>(`/empleados/${id}`);
   return empleado;
+}
+
+/**
+ * Resuelve el Empleado vinculado a un Usuario de login por su `usuarioId`
+ * (o `null` si no existe ninguno). Usado por "Mi Perfil"
+ * (app/mi-perfil/page.tsx) para que cualquier usuario logueado edite sus
+ * propios datos a partir de `useSesion().usuarioActual.id`.
+ */
+export async function obtenerEmpleadoPorUsuarioId(usuarioId: string): Promise<Empleado | null> {
+  const empleados = await listarEmpleados({ usuarioId });
+  return empleados[0] ?? null;
 }
 
 export async function crearEmpleado(body: NuevoEmpleadoBody): Promise<Empleado> {

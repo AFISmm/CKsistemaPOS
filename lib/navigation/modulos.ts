@@ -18,6 +18,18 @@
  *    caso; permisos nuevos otorgados solo a rol-gerente, porque alta/baja de
  *    personal y calculo de pago son operaciones gerenciales, no de
  *    mostrador/cocina.
+ *  - "/menu" ("menu.gestionar"): agregar/editar platos del catalogo es una
+ *    operacion gerencial (mismo criterio que empleados/nomina de arriba);
+ *    otorgado solo a rol-gerente y rol-developer (ver PERMISOS_GERENCIALES en
+ *    lib/db/store.ts).
+ *
+ * SUB-ITEMS (unico modulo con `subitems` hoy: "/pos", "Terminal de Cajero"):
+ * a pedido de producto, "Nuevo pedido" e "Historial de pedidos" (antes botones
+ * en el header de app/pos/page.tsx) se movieron al sidebar como sub-items
+ * anidados debajo del modulo padre. Son siempre visibles (sin
+ * expandir/colapsar) y comparten el permiso del modulo padre — no llevan
+ * `permiso` propio. NO generalices este patron a los demas modulos salvo que
+ * producto lo pida explicitamente para otro modulo.
  *
  * EXTENSION FUTURA: agrega aqui los nuevos modulos de sidebar cuando se
  * creen. Los flujos de las etapas 2 ("jornada" TOTP + verificacion facial) y
@@ -43,15 +55,30 @@ export interface ModuloNavegacion {
   labelKey: string;
   /** null = visible para cualquier usuario autenticado, sin importar su rol. */
   permiso: string | null;
+  /**
+   * Sub-items anidados, siempre visibles debajo del link del modulo padre
+   * (sin expandir/colapsar). Heredan el permiso del padre; no llevan `permiso`
+   * propio. Ver nota "SUB-ITEMS" arriba.
+   */
+  subitems?: { href: string; labelKey: string }[];
 }
 
 export const MODULOS_NAVEGACION: ModuloNavegacion[] = [
   { href: "/", labelKey: "sidebar.inicio", permiso: null },
-  { href: "/pos", labelKey: "sidebar.pos", permiso: "pedido.crear" },
+  {
+    href: "/pos",
+    labelKey: "sidebar.pos",
+    permiso: "pedido.crear",
+    subitems: [
+      { href: "/pos", labelKey: "sidebar.pos.nuevoPedido" },
+      { href: "/pos/historial", labelKey: "sidebar.pos.historial" },
+    ],
+  },
   { href: "/kds", labelKey: "sidebar.kds", permiso: "cocina.actualizarEstado" },
   { href: "/reportes", labelKey: "sidebar.reportes", permiso: "reportes.ver" },
   { href: "/empleados", labelKey: "sidebar.empleados", permiso: "empleados.gestionar" },
   { href: "/nomina", labelKey: "sidebar.nomina", permiso: "nomina.ver" },
+  { href: "/menu", labelKey: "sidebar.menu", permiso: "menu.gestionar" },
 ];
 
 /** Filtra MODULOS_NAVEGACION contra los permisos del rol dado. */

@@ -39,6 +39,15 @@ interface SesionContextValue {
   cargando: boolean;
   login: (email: string, pin: string) => Promise<void>;
   logout: () => void;
+  /**
+   * Vuelve a resolver usuario+rol contra el servidor para el usuario
+   * logueado actual (no cambia de sesion). Uso previsto: "Mi Perfil"
+   * (app/mi-perfil/page.tsx) llama esto tras editar el propio nombre, para
+   * que el saludo del Topbar (`usuarioActual.nombre`) quede sincronizado sin
+   * necesitar cerrar sesion y volver a entrar. No-op si no hay sesion activa;
+   * si falla (ej. sin red), se mantiene el estado actual sin lanzar.
+   */
+  refrescarSesion: () => Promise<void>;
 }
 
 const SesionContext = createContext<SesionContextValue | null>(null);
@@ -103,8 +112,18 @@ export function SesionProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function refrescarSesion(): Promise<void> {
+    if (!usuarioActual) return;
+    try {
+      const { usuario, rol } = await obtenerSesionActual(usuarioActual.id);
+      setUsuarioActual({ ...usuario, rol });
+    } catch {
+      // Si falla (ej. sin red), se mantiene el estado actual: no es critico.
+    }
+  }
+
   return (
-    <SesionContext.Provider value={{ usuarioActual, cargando, login, logout }}>
+    <SesionContext.Provider value={{ usuarioActual, cargando, login, logout, refrescarSesion }}>
       {children}
     </SesionContext.Provider>
   );

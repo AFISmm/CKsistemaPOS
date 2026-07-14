@@ -111,10 +111,14 @@ y su logica de registro (`lib/rrhh/asistencia.ts:registrarMarcaje`) — no crea 
 entidad de marcaje paralela.
 
 **Decision de negocio (ya tomada con el dueno de producto, ver prompt de la etapa)**:
-el empleado marca su jornada desde su CELULAR con (1) verificacion facial simulada,
-(2) un codigo TOTP de 6 digitos que se muestra en una PANTALLA CENTRAL FIJA de la
-tienda (no en el celular del empleado) — eso es lo que prueba presencia fisica en la
-tienda, a diferencia de mostrar el codigo en el mismo celular.
+el empleado marca su jornada desde su CELULAR con (1) verificacion facial —
+REFORZADA con biometria REAL del dispositivo (Face ID/Touch ID/Windows Hello via
+WebAuthn) cuando el navegador la soporta, con los dos botones "Simular
+exitosa/fallida" como plan B explicito (dispositivos sin autenticador de
+plataforma, o pruebas por curl/testing) —, (2) un codigo TOTP de 6 digitos que se
+muestra en una PANTALLA CENTRAL FIJA de la tienda (no en el celular del empleado) —
+eso es lo que prueba presencia fisica en la tienda, a diferencia de mostrar el
+codigo en el mismo celular.
 
 - **Rutas**: `/jornada/pantalla` (pantalla central/kiosko de la tienda) y
   `/jornada/marcar` (celular del empleado). Ambas estan EXENTAS del guard de sesion
@@ -125,9 +129,12 @@ tienda, a diferencia de mostrar el codigo en el mismo celular.
   agrego al sidebar (`lib/navigation/modulos.ts`): no dependen de sesion/rol.
 - **Endpoints**: `GET /api/v1/jornada/codigo?ubicacionId=` (unico autorizado a revelar
   el codigo vigente + segundos restantes), `POST /api/v1/jornada/intento-facial`
-  (reporta cada intento facial simulado; fuente de verdad del contador de fallos),
-  `GET /api/v1/jornada/bloqueo?empleadoId=`, `POST /api/v1/jornada/marcar` (facial +
-  codigo TOTP) y `POST /api/v1/jornada/marcar-respaldo` (PIN de respaldo).
+  (reporta el resultado de cada intento facial — real via WebAuthn o simulado; fuente
+  de verdad del contador de fallos), `GET /api/v1/jornada/bloqueo?empleadoId=`,
+  `POST /api/v1/jornada/marcar` (facial + codigo TOTP), `POST /api/v1/jornada/marcar-respaldo`
+  (PIN de respaldo), `POST /api/v1/jornada/webauthn/opciones-registro`,
+  `POST /api/v1/jornada/webauthn/registrar` y `POST /api/v1/jornada/webauthn/opciones-login`
+  (registro/uso de Face ID/Touch ID/Windows Hello real, ver seccion siguiente).
   Codigo: `lib/jornada/*`, `app/api/v1/jornada/**`.
 
 ### Que es REAL (algoritmo genuino, no un mock)
@@ -146,23 +153,42 @@ tienda, a diferencia de mostrar el codigo en el mismo celular.
   bloqueo. El servidor es la unica fuente de verdad (el conteo del celular es solo
   UX); `POST /api/v1/jornada/marcar-respaldo` verifica que el empleado este
   REALMENTE bloqueado antes de aceptar el PIN, para que no sea un atajo.
+- **Gesto biometrico real (WebAuthn)** — `lib/jornada/webauthn.ts`,
+  `app/jornada/marcar/page.tsx`: en dispositivos con autenticador de plataforma
+  (`PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()`), el boton
+  "Usar Face ID / Touch ID de este dispositivo" llama a
+  `navigator.credentials.create()`/`.get()` con `authenticatorAttachment: "platform"`
+  y `userVerification: "required"`. Eso hace que el SISTEMA OPERATIVO exija el gesto
+  biometrico real (Face ID/Touch ID/Windows Hello) antes de que el navegador devuelva
+  cualquier credencial — es soporte de plataforma nativo del navegador, no requiere
+  SDK ni backend FIDO2 completo. Ademas, el servidor NUNCA recibe ni procesa datos
+  biometricos crudos (imagen facial, huella, etc.): el emparejamiento biometrico
+  ocurre enteramente en el dispositivo del empleado; el navegador solo le entrega al
+  servidor un identificador de credencial opaco.
 
 ### Que es MOCK / DEMO (reemplazar antes de produccion)
 
 | Area | Que es demo | Reemplazar por |
 |------|-------------|----------------|
-| **Verificacion facial** | Simulada por completo: dos botones "Simular exitosa/fallida" en `/jornada/marcar`, sin acceso a camara ni procesamiento biometrico real. | SDK de reconocimiento facial real (ver nota de cumplimiento abajo). |
+| **Verificacion facial** | REFORZADA con biometria real via WebAuthn (ver arriba) cuando el dispositivo lo soporta, pero el SERVIDOR no verifica la firma criptografica de la asercion WebAuthn (`attestationObject`/`authenticatorData`/`clientDataJSON`) ni lleva contador anti-replay: solo confirma que existe una credencial registrada y confia en que el navegador ya exigio el gesto biometrico. Los botones "Simular exitosa/fallida" siguen disponibles como plan B (sin soporte de plataforma, o pruebas por curl/testing). | Libreria de servidor WebAuthn completa (ej. `@simplewebauthn/server`) para verificar la firma contra la clave publica registrada, atestacion y contador anti-replay; permitir multiples credenciales por empleado (multi-dispositivo). |
 | **Secreto TOTP** | Fijo, sembrado en `lib/db/store.ts` (`Ubicacion.secretoTotp`), igual para toda la vida de la demo. | Secreto aleatorio fuerte por tienda, aprovisionado/rotado de forma segura (ej. al dar de alta la tablet de la tienda). |
 | **Prueba de presencia del PIN de respaldo** | El marcaje por PIN de respaldo (`metodoVerificacion="pinRespaldo"`) NO exige el codigo TOTP, por lo tanto se registra con `dentroDeGeofence=false`: es un gap de presencia fisica conocido y aceptado como trade-off del plan B. | Definir una prueba de presencia alternativa para el plan B (ej. geofencing GPS real) si se necesita mantener la garantia de presencia incluso en el flujo de respaldo. |
 
 > **NOTA DE CUMPLIMIENTO LEGAL (a resolver antes de produccion)**: el reconocimiento
-> facial real implica procesar datos biometricos, que en muchas jurisdicciones (ej.
-> BIPA en Illinois, GDPR en la UE, leyes de privacidad de FL/TX en evolucion) exige
-> consentimiento explicito, politica de retencion/borrado de datos biometricos y,
-> en algunos casos, evaluacion de impacto de privacidad. Por eso esta demo NUNCA
-> procesa biometria real: se simula exito/fallo. Antes de integrar un SDK real de
-> verificacion facial hay que resolver ese marco legal con el equipo de
-> cumplimiento/legal, igual que se documento para el PSP (ADR-0005) y el hardware.
+> facial tradicional (SDK que procesa imagenes/plantillas faciales en el servidor)
+> implica procesar datos biometricos, que en muchas jurisdicciones (ej. BIPA en
+> Illinois, GDPR en la UE, leyes de privacidad de FL/TX en evolucion) exige
+> consentimiento explicito, politica de retencion/borrado de datos biometricos y, en
+> algunos casos, evaluacion de impacto de privacidad. El refuerzo con WebAuthn de
+> esta etapa reduce ese riesgo (el servidor nunca recibe ni almacena datos
+> biometricos crudos, solo un identificador de credencial opaco), pero NO lo elimina
+> por completo ni sustituye el analisis legal: sigue habiendo temas a resolver antes
+> de produccion (ej. si el emparejamiento biometrico "cuenta" como procesamiento de
+> datos biometricos bajo BIPA/GDPR aunque ocurra solo en el dispositivo, consentimiento
+> informado, que pasa si el empleado no tiene o no quiere usar biometria de
+> plataforma). Antes de depender de esto en produccion hay que resolver ese marco
+> legal con el equipo de cumplimiento/legal, igual que se documento para el PSP
+> (ADR-0005) y el hardware.
 
 ## Chatbot de ayuda — etapa 3
 
