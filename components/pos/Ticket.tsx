@@ -12,13 +12,22 @@ interface Props {
   onEliminarLinea: (lineaId: string) => void;
   onEnviarACocina: () => void;
   onAbrirDescuento: () => void;
-  onAbrirCobro: () => void;
+  /**
+   * Opcional: cuando se omite (ej. app/pos/nuevo, la pantalla de armar
+   * pedido) el boton "Cobrar" simplemente no se renderiza. Esta pantalla NO
+   * cobra — solo arma el pedido y lo envia a cocina. app/pos/page.tsx (la
+   * pantalla de revisar-y-cobrar los pedidos que cocina ya envio a caja) SI
+   * la provee para abrir CobroModal.
+   */
+  onAbrirCobro?: () => void;
 }
 
 /**
- * Ticket en vivo (panel derecho). SIEMPRE muestra los totales tal como los
- * devuelve el backend (subtotal/descuento/impuesto/propina/total en centavos).
- * Nunca se recalcula nada de dinero en el cliente.
+ * Ticket en vivo (panel derecho), reutilizado por app/pos/nuevo (armar
+ * pedido, sin boton de cobrar) y app/pos (revisar/cobrar pedidos ya
+ * entregados por cocina, con boton de cobrar). SIEMPRE muestra los totales
+ * tal como los devuelve el backend (subtotal/descuento/impuesto/propina/total
+ * en centavos). Nunca se recalcula nada de dinero en el cliente.
  */
 export default function Ticket({
   pedido,
@@ -188,14 +197,16 @@ export default function Ticket({
         >
           {enviandoACocina ? t("pos.ticket.enviando") : t("pos.ticket.enviarACocina")}
         </button>
-        <button
-          type="button"
-          onClick={onAbrirCobro}
-          disabled={!hayLineas}
-          className="w-full rounded-xl bg-ck-red py-4 text-lg font-bold text-white active:scale-95 disabled:opacity-40"
-        >
-          {t("pos.ticket.cobrar", { monto: formatearDinero(pedido.total) })}
-        </button>
+        {onAbrirCobro && (
+          <button
+            type="button"
+            onClick={onAbrirCobro}
+            disabled={!hayLineas}
+            className="w-full rounded-xl bg-ck-red py-4 text-lg font-bold text-white active:scale-95 disabled:opacity-40"
+          >
+            {t("pos.ticket.cobrar", { monto: formatearDinero(pedido.total) })}
+          </button>
+        )}
       </div>
     </aside>
   );

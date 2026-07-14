@@ -9,11 +9,18 @@
  * (>= lg, 1024px); por debajo de ese breakpoint es un drawer que se abre/cierra
  * con el boton hamburguesa de la barra superior (ver Topbar.tsx / AppShell.tsx).
  *
- * EXCEPCION: "Terminal de Cajero" (/pos) es el UNICO modulo con `subitems`
- * (ver lib/navigation/modulos.ts). Sus sub-items ("Nuevo pedido"/"Historial de
- * pedidos") se renderizan siempre visibles, indentados debajo del link padre
- * (sin expandir/colapsar) — reemplazan a los botones que antes vivian en el
- * header de app/pos/page.tsx. No generalices este patron a otros modulos.
+ * ACORDEON: los modulos con `subitems` (ver lib/navigation/modulos.ts —
+ * hoy "Terminal de Cajero" /pos y "Personal" /empleados) se renderizan como
+ * un desplegable colapsado por defecto. El link del modulo padre SIGUE
+ * navegando a su propio href (sigue siendo un link real), pero ADEMAS actua
+ * como toggle: un clic despliega/colapsa sus sub-items indentados. Al cargar
+ * la pagina, el desplegable aparece YA expandido si el usuario esta parado en
+ * la ruta del propio modulo o en la de cualquiera de sus sub-items (ver
+ * `estaEnRutaDelModulo` abajo) — asi el submodulo activo nunca se siente
+ * "perdido" detras de un acordeon cerrado. Los sub-items se filtran
+ * individualmente por permiso (ver `subitemsVisiblesDelModulo` en
+ * lib/navigation/modulos.ts). No generalices este patron a modulos sin
+ * `subitems` salvo que producto lo pida explicitamente.
  *
  * Bloque inferior (debajo del nav, encima del aviso demo), de arriba a
  * abajo: "Mi Perfil", "Gestionar perfiles" (solo visible si el rol tiene el
@@ -36,7 +43,12 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { modulosVisiblesParaRol } from "@/lib/navigation/modulos";
+import { useState } from "react";
+import {
+  modulosVisiblesParaRol,
+  subitemsVisiblesDelModulo,
+  type ModuloNavegacion,
+} from "@/lib/navigation/modulos";
 import { useSesion } from "@/lib/shell/SesionProvider";
 import { useI18n } from "@/lib/shell/I18nProvider";
 
@@ -45,12 +57,41 @@ interface SidebarProps {
   onCerrar: () => void;
 }
 
+/**
+ * true si `pathname` corresponde al propio modulo o a alguno de sus
+ * sub-items (incluye sub-rutas anidadas, ej. /empleados/abc123 cuenta como
+ * la ruta del sub-item /empleados). Se usa para decidir si el acordeon
+ * arranca expandido al cargar la pagina.
+ */
+function estaEnRutaDelModulo(modulo: ModuloNavegacion, pathname: string): boolean {
+  if (pathname === modulo.href) return true;
+  return (modulo.subitems ?? []).some(
+    (sub) => pathname === sub.href || pathname.startsWith(`${sub.href}/`)
+  );
+}
+
 export default function Sidebar({ abierto, onCerrar }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { usuarioActual, logout } = useSesion();
   const { t } = useI18n();
   const modulos = modulosVisiblesParaRol(usuarioActual?.rol);
+
+  // Overrides manuales del acordeon (clic del usuario). Cuando un modulo no
+  // tiene override todavia, su estado expandido/colapsado por defecto se
+  // calcula en cada render a partir de la ruta actual (`estaEnRutaDelModulo`)
+  // — asi no depende del orden de carga de `usuarioActual`/`modulos`.
+  const [expandidoOverride, setExpandidoOverride] = useState<Record<string, boolean>>({});
+
+  function estaExpandido(modulo: ModuloNavegacion): boolean {
+    const override = expandidoOverride[modulo.href];
+    if (override !== undefined) return override;
+    return estaEnRutaDelModulo(modulo, pathname);
+  }
+
+  function alternarExpandido(modulo: ModuloNavegacion) {
+    setExpandidoOverride((prev) => ({ ...prev, [modulo.href]: !estaExpandido(modulo) }));
+  }
 
   const puedeGestionarPerfiles = usuarioActual?.rol.permisos.includes("usuarios.gestionar") ?? false;
 
@@ -88,23 +129,63 @@ export default function Sidebar({ abierto, onCerrar }: SidebarProps) {
         <nav className="flex-1 space-y-1 px-2 pb-4" aria-label={t("sidebar.inicio")}>
           {modulos.map((modulo) => {
             const activo = pathname === modulo.href;
+            const subVisibles = subitemsVisiblesDelModulo(modulo, usuarioActual?.rol);
+            const tieneAcordeon = subVisibles.length > 0;
+            const expandido = tieneAcordeon && estaExpandido(modulo);
             return (
               <div key={modulo.href}>
-                <Link
-                  href={modulo.href}
-                  onClick={onCerrar}
-                  aria-current={activo ? "page" : undefined}
-                  className={`flex min-h-[44px] items-center rounded-lg px-3 text-sm font-semibold transition ${
+                <div
+                  className={`flex min-h-[44px] items-center rounded-lg pr-1 text-sm font-semibold transition ${
                     activo
                       ? "bg-ck-red text-white"
                       : "text-neutral-700 hover:bg-ck-cream dark:text-neutral-300 dark:hover:bg-neutral-800"
                   }`}
                 >
-                  {t(modulo.labelKey)}
-                </Link>
-                {modulo.subitems && modulo.subitems.length > 0 && (
-                  <div className="mt-1 space-y-1">
-                    {modulo.subitems.map((sub) => {
+                  <Link
+                    href={modulo.href}
+                    onClick={() => {
+                      if (tieneAcordeon) alternarExpandido(modulo);
+                      onCerrar();
+                    }}
+                    aria-current={activo ? "page" : undefined}
+                    className="flex min-h-[44px] flex-1 items-center px-3"
+                  >
+                    {t(modulo.labelKey)}
+                  </Link>
+                  {tieneAcordeon && (
+                    <button
+                      type="button"
+                      onClick={() => alternarExpandido(modulo)}
+                      aria-expanded={expandido}
+                      aria-label={t(expandido ? "sidebar.colapsar" : "sidebar.expandir")}
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition ${
+                        activo ? "hover:bg-white/20" : "hover:bg-black/5 dark:hover:bg-white/10"
+                      }`}
+                    >
+                      <svg
+                        viewBox="0 0 20 20"
+                        fill="none"
+                        aria-hidden="true"
+                        className={`h-4 w-4 transition-transform duration-200 ${expandido ? "rotate-90" : "rotate-0"}`}
+                      >
+                        <path
+                          d="M7 4l6 6-6 6"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                {tieneAcordeon && (
+                  <div
+                    className={`space-y-1 overflow-hidden transition-all duration-200 ${
+                      expandido ? "mt-1 max-h-96 opacity-100" : "max-h-0 opacity-0"
+                    }`}
+                  >
+                    {subVisibles.map((sub) => {
                       const subActivo = pathname === sub.href;
                       return (
                         <Link

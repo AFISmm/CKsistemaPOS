@@ -82,6 +82,28 @@ export function formatearCronometro(ms: number): string {
 }
 
 /**
+ * Milisegundos RESTANTES hasta el objetivo de cocina (TIEMPO_OBJETIVO_MS,
+ * 15 min), contrapartida de `msTranscurridos`. A diferencia de esa funcion,
+ * ESTA SI puede devolver un numero negativo a proposito: una vez superado el
+ * objetivo, el valor absoluto representa cuanto tiempo de "overtime" lleva el
+ * pedido (ver `formatearRestante`, que antepone "+" en ese caso) — un
+ * cajero/gerente necesita distinguir "todavia falta X" de "ya se paso por Y".
+ */
+export function msRestantes(desdeIso: string, ahoraMs: number): number {
+  return TIEMPO_OBJETIVO_MS - msTranscurridos(desdeIso, ahoraMs);
+}
+
+/**
+ * Formatea el tiempo RESTANTE (ver `msRestantes`) reusando `formatearCronometro`
+ * para el formato mm:ss: "07:28" mientras queda tiempo, "+02:15" en overtime
+ * (superado el objetivo de 15 min) en vez de mostrar un engañoso "00:00".
+ */
+export function formatearRestante(restanteMs: number): string {
+  if (restanteMs < 0) return `+${formatearCronometro(Math.abs(restanteMs))}`;
+  return formatearCronometro(restanteMs);
+}
+
+/**
  * Nivel de alerta de tiempo del pedido, puro y facil de probar con `ahoraMs`
  * simulado (no depende del reloj real): pasa `pedido.enviadoACocinaEn ??
  * pedido.creadoEn` como `enviadoACocinaEnOCreadoEn`. Ver documentacion de los

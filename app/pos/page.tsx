@@ -1,27 +1,54 @@
 "use client";
 
+/**
+ * Terminal de Cajero (/pos) — pagina PRINCIPAL del modulo del mismo nombre en
+ * el sidebar (ver lib/navigation/modulos.ts). Desde esta iteracion, esta
+ * pantalla YA NO arma pedidos (eso vive en el sub-item "Nuevo pedido",
+ * app/pos/nuevo/page.tsx): pasa a ser la pantalla de REVISAR los pedidos que
+ * cocina ya termino y envio a caja (estado "entregado", ver `enviarACaja` en
+ * lib/sales/engine.ts) y COBRARLOS.
+ *
+ * Flujo completo del pedido (documentado aqui para quien llegue a este
+ * archivo sin el contexto de las otras piezas):
+ *   1. Cajero arma el pedido en /pos/nuevo y lo "Envia a cocina"
+ *      (estado "abierto" -> "enviadoCocina").
+ *   2. Cocina (/kds) lo prepara: "Empezar" (-> "enPreparacion"), "Listo"
+ *      (-> "listo" cuando todas las lineas terminan) y finalmente
+ *      "Enviar a caja" (-> "entregado", fija `entregadoEn`).
+ *   3. AQUI: la lista de abajo muestra todos los pedidos "entregado"
+ *      (GET /api/v1/pedidos?estado=entregado), con polling ligero (5s, mas
+ *      lento que el KDS que es cada 2.5s) + boton manual de actualizar. Click
+ *      en una fila carga su detalle completo y lo muestra en el panel derecho
+ *      reutilizando components/pos/Ticket.tsx — el MISMO componente que usa
+ *      /pos/nuevo, pero esta vez CON la prop `onAbrirCobro` (ahora opcional,
+ *      ver Ticket.tsx) para poder cobrar. Al completarse el pago
+ *      (CobroModal -> saldoPendiente <= 0) el pedido pasa a "cobrado"
+ *      (backend, lib/sales/engine.ts `registrarPagoEnPedido`) y se muestra
+ *      ReciboModal; al cerrarlo, el pedido ya no aparece en esta lista.
+ *
+ * El calculo de dinero (subtotal/descuento/impuesto/propina/total, saldo
+ * pendiente) es SIEMPRE responsabilidad del backend (backend-ventas-pos) —
+ * este archivo nunca recalcula montos, solo muestra lo que el servidor
+ * devuelve.
+ */
+
 import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/lib/shell/I18nProvider";
 import FondoFoto from "@/components/shell/FondoFoto";
 import { textoErrorApi } from "@/lib/i18n/erroresApi";
-import type { Pago, Pedido, Producto } from "@/lib/domain/types";
+import type { Pago, Pedido } from "@/lib/domain/types";
+import { formatearDinero } from "@/lib/domain/types";
 import {
   actualizarLinea,
-  agregarLinea,
   aplicarDescuento,
-  crearPedido,
   enviarACocina,
-  obtenerCatalogo,
+  listarPedidosPorEstado,
   obtenerPedido,
-  type CatalogoResponse,
   type PagoResponse,
 } from "@/components/pos/api";
-import CategoriasTabs from "@/components/pos/CategoriasTabs";
-import ProductosGrid from "@/components/pos/ProductosGrid";
-import ModificadorModal from "@/components/pos/ModificadorModal";
-import DescuentoModal from "@/components/pos/DescuentoModal";
 import Ticket from "@/components/pos/Ticket";
+import DescuentoModal from "@/components/pos/DescuentoModal";
 import CobroModal from "@/components/pos/CobroModal";
 import ReciboModal from "@/components/pos/ReciboModal";
 
@@ -29,18 +56,45 @@ import ReciboModal from "@/components/pos/ReciboModal";
 // en lib/db/store.ts (rol cajero) para las acciones que requieren usuarioId.
 const USUARIO_DEMO_ID = "user-cajero-demo";
 
+/** Polling de la lista de "por cobrar", deliberadamente mas lento que el KDS
+ * (2.5s, ver lib/kitchen/kds.ts POLLING_MS): esta pantalla no tiene la misma
+ * presion de tiempo real que la cocina. */
+const POLLING_LISTA_MS = 5000;
+
+const CLAVE_CANAL: Record<Pedido["canal"], string> = {
+  mostrador: "kds.canal.mostrador",
+  kiosco: "kds.canal.kiosco",
+  online: "kds.canal.online",
+  delivery: "kds.canal.delivery",
+  catering: "kds.canal.catering",
+};
+
+function formatearHora(iso: string | null): string {
+  if (!iso) return "—";
+  const fecha = new Date(iso);
+  if (Number.isNaN(fecha.getTime())) return "—";
+  return fecha.toLocaleTimeString("es-US", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
 export default function TerminalCajeroPage() {
   const { t } = useI18n();
-  const [catalogo, setCatalogo] = useState<CatalogoResponse | null>(null);
-  const [pedido, setPedido] = useState<Pedido | null>(null);
-  const [categoriaActivaId, setCategoriaActivaId] = useState<string | null>(null);
 
-  const [cargandoInicial, setCargandoInicial] = useState(true);
-  const [errorInicial, setErrorInicial] = useState<string | null>(null);
+  // ---------- Lista de pedidos "entregado" (por cobrar) ----------
+  const [pedidos, setPedidos] = useState<Pedido[]>([]);
+  const [cargandoLista, setCargandoLista] = useState(true);
+  const [errorLista, setErrorLista] = useState<string | null>(null);
+
+  // ---------- Detalle del pedido seleccionado ----------
+  const [pedidoSeleccionadoId, setPedidoSeleccionadoId] = useState<string | null>(null);
+  const [pedido, setPedido] = useState<Pedido | null>(null);
+  const [cargandoDetalle, setCargandoDetalle] = useState(false);
   const [errorGlobal, setErrorGlobal] = useState<string | null>(null);
 
-  const [productoEnModal, setProductoEnModal] = useState<Producto | null>(null);
-  const [agregandoLinea, setAgregandoLinea] = useState(false);
   const [actualizandoLineaId, setActualizandoLineaId] = useState<string | null>(null);
   const [enviandoACocina, setEnviandoACocina] = useState(false);
 
@@ -68,104 +122,70 @@ export default function TerminalCajeroPage() {
     };
   }, []);
 
-  // ---------- Inicializacion: crear pedido + cargar catalogo ----------
-  const iniciar = useCallback(async () => {
-    setCargandoInicial(true);
-    setErrorInicial(null);
+  // ---------- Carga de la lista "por cobrar" (poll + refresh manual) ----------
+  const cargarLista = useCallback(async () => {
     try {
-      const [nuevoPedido, cat] = await Promise.all([
-        crearPedido({ canal: "mostrador" }),
-        obtenerCatalogo(),
-      ]);
-      setPedido(nuevoPedido);
-      setCatalogo(cat);
-      const primeraActiva = [...cat.categorias]
-        .filter((c) => c.activo)
-        .sort((a, b) => a.orden - b.orden)[0];
-      setCategoriaActivaId(primeraActiva?.id ?? null);
-      setSaldoPendiente(null);
-      setPagosRealizados([]);
-      setMostrarRecibo(false);
-      setMostrarCobro(false);
-      setMostrarDescuento(false);
-      setProductoEnModal(null);
+      const lista = await listarPedidosPorEstado("entregado");
+      const ordenados = [...lista].sort((a, b) =>
+        (a.entregadoEn ?? a.creadoEn).localeCompare(b.entregadoEn ?? b.creadoEn)
+      );
+      setPedidos(ordenados);
+      setErrorLista(null);
     } catch (err) {
-      setErrorInicial(textoErrorApi(err, t, "pos.errorNoPudoIniciar"));
+      setErrorLista(textoErrorApi(err, t, "pos.cobrar.errorCarga"));
     } finally {
-      setCargandoInicial(false);
-    }
-    // "iniciar" se mantiene con identidad estable (deps []) a proposito: el
-    // useEffect de abajo lo dispara una sola vez al montar. Si dependiera de
-    // "t" (cambia de identidad al alternar idioma), cambiar el idioma
-    // reiniciaria el pedido en curso del cajero, algo inaceptable en un POS.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    iniciar();
-  }, [iniciar]);
-
-  const refrescarPedido = useCallback(async (pedidoId: string) => {
-    try {
-      const actualizado = await obtenerPedido(pedidoId);
-      setPedido(actualizado);
-      return actualizado;
-    } catch (err) {
-      setErrorGlobal(textoErrorApi(err, t, "pos.errorNoPudoActualizarPedido"));
-      return null;
+      setCargandoLista(false);
     }
   }, [t]);
 
-  // ---------- Seleccion de producto / modificadores ----------
-  function manejarSeleccionProducto(producto: Producto) {
-    if (!pedido || !catalogo) return;
-    const grupos = catalogo.gruposModificador.filter((g) => g.productoId === producto.id);
-    if (grupos.length === 0) {
-      agregarLineaRapida(producto.id);
-    } else {
-      setProductoEnModal(producto);
-    }
+  useEffect(() => {
+    cargarLista();
+    const intervalo = setInterval(cargarLista, POLLING_LISTA_MS);
+    return () => clearInterval(intervalo);
+  }, [cargarLista]);
+
+  // ---------- Seleccion de pedido / carga de detalle ----------
+  const cargarDetalle = useCallback(
+    async (pedidoId: string) => {
+      setCargandoDetalle(true);
+      setErrorGlobal(null);
+      try {
+        const detalle = await obtenerPedido(pedidoId);
+        setPedido(detalle);
+        setSaldoPendiente(null);
+        setPagosRealizados([]);
+        setMostrarCobro(false);
+        setMostrarRecibo(false);
+        setMostrarDescuento(false);
+      } catch (err) {
+        setErrorGlobal(textoErrorApi(err, t, "pos.errorNoPudoActualizarPedido"));
+      } finally {
+        setCargandoDetalle(false);
+      }
+    },
+    [t]
+  );
+
+  function seleccionarPedido(pedidoId: string) {
+    setPedidoSeleccionadoId(pedidoId);
+    cargarDetalle(pedidoId);
   }
 
-  async function agregarLineaRapida(productoId: string) {
-    if (!pedido) return;
-    setAgregandoLinea(true);
-    setErrorGlobal(null);
-    try {
-      await agregarLinea(pedido.id, { productoId, cantidad: 1 });
-      await refrescarPedido(pedido.id);
-    } catch (err) {
-      setErrorGlobal(textoErrorApi(err, t, "pos.errorNoPudoAgregarProducto"));
-    } finally {
-      setAgregandoLinea(false);
-    }
-  }
+  const refrescarPedido = useCallback(
+    async (pedidoId: string) => {
+      try {
+        const actualizado = await obtenerPedido(pedidoId);
+        setPedido(actualizado);
+        return actualizado;
+      } catch (err) {
+        setErrorGlobal(textoErrorApi(err, t, "pos.errorNoPudoActualizarPedido"));
+        return null;
+      }
+    },
+    [t]
+  );
 
-  async function confirmarModificadores(datos: {
-    modificadorIds: string[];
-    cantidad: number;
-    notas: string;
-  }) {
-    if (!pedido || !productoEnModal) return;
-    setAgregandoLinea(true);
-    setErrorGlobal(null);
-    try {
-      await agregarLinea(pedido.id, {
-        productoId: productoEnModal.id,
-        cantidad: datos.cantidad,
-        modificadorIds: datos.modificadorIds,
-        notas: datos.notas || undefined,
-      });
-      await refrescarPedido(pedido.id);
-      setProductoEnModal(null);
-    } catch (err) {
-      setErrorGlobal(textoErrorApi(err, t, "pos.errorNoPudoAgregarProducto"));
-    } finally {
-      setAgregandoLinea(false);
-    }
-  }
-
-  // ---------- Cambios de linea en el ticket ----------
+  // ---------- Cambios de linea en el ticket (mismas reglas de backend que /pos/nuevo) ----------
   async function cambiarCantidadLinea(lineaId: string, nuevaCantidad: number) {
     if (!pedido) return;
     setActualizandoLineaId(lineaId);
@@ -198,7 +218,9 @@ export default function TerminalCajeroPage() {
     }
   }
 
-  // ---------- Enviar a cocina ----------
+  // ---------- Enviar a cocina (deshabilitado por Ticket salvo estado abierto/enviadoCocina; un
+  // pedido "entregado" nunca cumple esa condicion, pero se cablea el handler igual por
+  // consistencia con el componente compartido). ----------
   async function manejarEnviarACocina() {
     if (!pedido) return;
     setEnviandoACocina(true);
@@ -250,56 +272,25 @@ export default function TerminalCajeroPage() {
     ) {
       setMostrarCobro(false);
       setMostrarRecibo(true);
+      // El pedido acaba de pasar a "cobrado": ya no debe aparecer en la lista
+      // de "por cobrar". Re-consultamos de inmediato en vez de esperar al
+      // proximo tick del polling.
+      cargarLista();
     }
   }
 
   const propinaAcumulada = pagosRealizados.reduce((acc, p) => acc + p.propina, 0);
 
-  async function manejarNuevoPedido() {
-    await iniciar();
+  /** Cierra el recibo y limpia la seleccion: el pedido ya esta "cobrado" y salio de la lista. */
+  function cerrarReciboYDeseleccionar() {
+    setMostrarRecibo(false);
+    setPedido(null);
+    setPedidoSeleccionadoId(null);
+    setSaldoPendiente(null);
+    setPagosRealizados([]);
   }
 
   // ---------- Render ----------
-
-  if (cargandoInicial) {
-    return (
-      <main className="relative flex min-h-screen flex-col items-center justify-center gap-4 overflow-hidden bg-ck-cream dark:bg-neutral-950">
-        <FondoFoto />
-        <div className="relative z-10 flex flex-col items-center gap-4">
-          <Image src="/cropped-Logo.webp" alt="Chicken Kitchen" width={160} height={64} priority />
-          <p className="text-sm text-neutral-600 dark:text-neutral-400">{t("pos.cargandoTerminal")}</p>
-        </div>
-      </main>
-    );
-  }
-
-  if (errorInicial || !pedido || !catalogo) {
-    return (
-      <main className="relative flex min-h-screen flex-col items-center justify-center gap-4 overflow-hidden bg-ck-cream p-6 text-center dark:bg-neutral-950">
-        <FondoFoto />
-        <div className="relative z-10 flex flex-col items-center gap-4">
-          <Image src="/cropped-Logo.webp" alt="Chicken Kitchen" width={160} height={64} priority />
-          <p className="max-w-md text-sm font-semibold text-ck-red dark:text-red-400">
-            {errorInicial ?? t("pos.errorCargaTerminal")}
-          </p>
-          <button
-            type="button"
-            onClick={iniciar}
-            className="rounded-xl bg-ck-red px-6 py-3 text-base font-bold text-white active:scale-95"
-          >
-            {t("pos.reintentar")}
-          </button>
-        </div>
-      </main>
-    );
-  }
-
-  const productosDeCategoria = catalogo.productos.filter(
-    (p) => p.categoriaId === categoriaActivaId
-  );
-  const gruposDelProductoEnModal = productoEnModal
-    ? catalogo.gruposModificador.filter((g) => g.productoId === productoEnModal.id)
-    : [];
 
   return (
     <main className="pos-notouch relative flex min-h-screen flex-col overflow-hidden bg-ck-cream dark:bg-neutral-950">
@@ -334,44 +325,97 @@ export default function TerminalCajeroPage() {
 
       <div className="relative z-10 flex flex-1 flex-col gap-4 p-4 lg:flex-row">
         <section className="flex-1">
-          <CategoriasTabs
-            categorias={catalogo.categorias}
-            categoriaActivaId={categoriaActivaId}
-            onSeleccionar={setCategoriaActivaId}
-          />
-          <div className="mt-4">
-            {agregandoLinea && (
-              <p className="mb-2 text-xs font-semibold text-neutral-600 dark:text-neutral-400">{t("pos.agregandoAlTicket")}</p>
-            )}
-            <ProductosGrid
-              productos={productosDeCategoria}
-              onSeleccionar={manejarSeleccionProducto}
-            />
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h1 className="text-xl font-bold text-ck-dark dark:text-neutral-100">
+              {t("pos.cobrar.titulo")}
+            </h1>
+            <button
+              type="button"
+              onClick={cargarLista}
+              className="rounded-lg border border-ck-red px-4 py-2 text-xs font-semibold text-ck-red active:scale-95 dark:border-red-400 dark:text-red-400"
+            >
+              {t("pos.cobrar.actualizar")}
+            </button>
           </div>
+
+          {cargandoLista ? (
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">{t("pos.cobrar.cargando")}</p>
+          ) : errorLista ? (
+            <div className="rounded-lg bg-red-100 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+              {errorLista}
+            </div>
+          ) : pedidos.length === 0 ? (
+            <div className="rounded-2xl bg-white p-6 text-center text-sm text-neutral-600 shadow-sm dark:bg-neutral-900 dark:text-neutral-400">
+              {t("pos.cobrar.sinPedidos")}
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-2xl bg-white shadow-sm dark:bg-neutral-900">
+              <table className="w-full min-w-[560px] text-left text-sm">
+                <thead className="border-b border-neutral-200 text-xs uppercase text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
+                  <tr>
+                    <th className="px-4 py-3">{t("pos.cobrar.colOrden")}</th>
+                    <th className="px-4 py-3">{t("pos.cobrar.colCliente")}</th>
+                    <th className="px-4 py-3">{t("pos.cobrar.colCanal")}</th>
+                    <th className="px-4 py-3">{t("pos.cobrar.colHora")}</th>
+                    <th className="px-4 py-3 text-right">{t("pos.cobrar.colTotal")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pedidos.map((p) => {
+                    const seleccionada = p.id === pedidoSeleccionadoId;
+                    return (
+                      <tr
+                        key={p.id}
+                        onClick={() => seleccionarPedido(p.id)}
+                        className={`cursor-pointer border-b border-neutral-100 last:border-0 dark:border-neutral-800 ${
+                          seleccionada
+                            ? "bg-ck-red/10 dark:bg-red-900/20"
+                            : "hover:bg-neutral-50 dark:hover:bg-neutral-800/60"
+                        }`}
+                      >
+                        <td className="px-4 py-3 font-bold text-ck-dark dark:text-neutral-100">
+                          #{p.numeroOrden}
+                        </td>
+                        <td className="px-4 py-3 text-neutral-700 dark:text-neutral-300">
+                          {p.nombreCliente || t("pos.ticket.clienteMostrador")}
+                        </td>
+                        <td className="px-4 py-3 text-neutral-700 dark:text-neutral-300">
+                          {t(CLAVE_CANAL[p.canal] ?? "kds.canal.mostrador")}
+                        </td>
+                        <td className="px-4 py-3 font-mono text-neutral-700 dark:text-neutral-300">
+                          {formatearHora(p.entregadoEn)}
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold text-ck-dark dark:text-neutral-100">
+                          {formatearDinero(p.total)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
-        <Ticket
-          pedido={pedido}
-          actualizandoLineaId={actualizandoLineaId}
-          enviandoACocina={enviandoACocina}
-          onCambiarCantidad={cambiarCantidadLinea}
-          onEliminarLinea={eliminarLinea}
-          onEnviarACocina={manejarEnviarACocina}
-          onAbrirDescuento={() => setMostrarDescuento(true)}
-          onAbrirCobro={abrirCobro}
-        />
+        {pedido ? (
+          <Ticket
+            pedido={pedido}
+            actualizandoLineaId={actualizandoLineaId}
+            enviandoACocina={enviandoACocina}
+            onCambiarCantidad={cambiarCantidadLinea}
+            onEliminarLinea={eliminarLinea}
+            onEnviarACocina={manejarEnviarACocina}
+            onAbrirDescuento={() => setMostrarDescuento(true)}
+            onAbrirCobro={abrirCobro}
+          />
+        ) : (
+          <aside className="flex w-full flex-col items-center justify-center rounded-2xl border border-neutral-200 bg-white p-8 text-center shadow-sm dark:border-neutral-700 dark:bg-neutral-900 lg:w-96">
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">
+              {cargandoDetalle ? t("pos.cobrar.cargandoDetalle") : t("pos.cobrar.seleccionaPedido")}
+            </p>
+          </aside>
+        )}
       </div>
-
-      {productoEnModal && (
-        <ModificadorModal
-          producto={productoEnModal}
-          grupos={gruposDelProductoEnModal}
-          modificadores={catalogo.modificadores}
-          enviando={agregandoLinea}
-          onConfirmar={confirmarModificadores}
-          onCancelar={() => setProductoEnModal(null)}
-        />
-      )}
 
       {mostrarDescuento && pedido && (
         <DescuentoModal
@@ -402,7 +446,7 @@ export default function TerminalCajeroPage() {
         <ReciboModal
           pedido={pedido}
           pagos={pagosRealizados}
-          onNuevoPedido={manejarNuevoPedido}
+          onNuevoPedido={cerrarReciboYDeseleccionar}
         />
       )}
     </main>

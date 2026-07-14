@@ -6,6 +6,8 @@ import {
   clasesEstado,
   estadoCocinaAgregado,
   formatearCronometro,
+  formatearRestante,
+  msRestantes,
   msTranscurridos,
   nivelAlertaTiempo,
   referenciaTiempoCocina,
@@ -52,6 +54,7 @@ export default function OrderCard({
   const clases = clasesEstado(estado);
   const referenciaTiempo = referenciaTiempoCocina(pedido);
   const transcurridoMs = msTranscurridos(referenciaTiempo, ahoraMs);
+  const restanteMs = msRestantes(referenciaTiempo, ahoraMs);
   const nivelAlerta = nivelAlertaTiempo(referenciaTiempo, ahoraMs);
 
   // El nivel de alerta de TIEMPO (amarillo/rojo, colores de alerta reales —
@@ -101,16 +104,26 @@ export default function OrderCard({
           </div>
         </div>
         <div
-          className={`rounded-lg px-3 py-2 text-right font-mono text-3xl font-bold tabular-nums ${
+          className={`rounded-lg px-3 py-2 text-right tabular-nums ${
             nivelAlerta === "rojo"
               ? "animate-pulse bg-red-700 text-white"
               : nivelAlerta === "amarillo"
                 ? "bg-yellow-400 text-neutral-950"
                 : "text-neutral-700 dark:text-neutral-200"
           }`}
-          aria-label={t("kds.tiempoAria")}
         >
-          {formatearCronometro(transcurridoMs)}
+          <div className="text-[10px] font-bold uppercase tracking-wider opacity-70">
+            {t("kds.transcurridoLabel")}
+          </div>
+          <div className="font-mono text-3xl font-bold" aria-label={t("kds.tiempoAria")}>
+            {formatearCronometro(transcurridoMs)}
+          </div>
+          <div
+            className="mt-0.5 font-mono text-sm font-bold uppercase tracking-wide"
+            aria-label={t("kds.restanteAria")}
+          >
+            {t("kds.restanteLabel")}: {formatearRestante(restanteMs)}
+          </div>
           {nivelAlerta === "rojo" && (
             <div className="text-xs font-bold uppercase tracking-wider">
               {t("kds.alertaRoja")}
