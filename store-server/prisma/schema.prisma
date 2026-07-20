@@ -121,6 +121,15 @@ enum TipoEventoAuditoria {
   /// "alertaMerma" es una segunda auditoria sobre lo que ya audita
   /// aplicarMovimiento).
   produccionInsumoElaborado
+  /// Gap identificado al cruzar la matriz de requerimientos de Alsea
+  /// (docs/analisis-reunion-diego-arches-20260717.md §7.2 #1): modificar o
+  /// eliminar una LineaDePedido que YA fue enviada a cocina
+  /// (`LineaDePedido.enviadaACocinaEn` no nulo) requiere permiso
+  /// `pedido.modificarEnviado` y queda auditada por separado — antes de este
+  /// fix, `VentasService.actualizarLinea` solo bloqueaba segun el ESTADO del
+  /// Pedido completo (cobrado/cancelado), nunca segun si esa linea especifica
+  /// ya estaba en preparacion.
+  lineaModificadaTrasEnvio
 }
 
 /// Motivo controlado de una SolicitudBaja (F3-T1). Lista corta y cerrada

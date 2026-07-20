@@ -93,6 +93,7 @@ async function main(): Promise<void> {
     "costeo.ver", // F2-T1: costo/margen real de un pedido (BOM por variante)
     "inventario.solicitarBaja", // F3-T1: el gerente tambien puede solicitar (no solo aprobar)
     "inventario.aprobarBaja", // F3-T1: aprobar/rechazar bajas es exclusivo del gerente
+    "pedido.modificarEnviado", // gap matriz Alsea: modificar/eliminar una linea ya enviada a cocina
   ];
   await prisma.rol.upsert({
     where: { id: "rol-cajero" },

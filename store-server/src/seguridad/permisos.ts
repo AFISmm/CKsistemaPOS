@@ -28,6 +28,12 @@ export const PERMISOS = {
   /// (via InventarioService, mismo permiso protege ambos endpoints). Acción
   /// gerencial (control de calidad/perdidas), no otorgada a cajero/cocina.
   INVENTARIO_APROBAR_BAJA: "inventario.aprobarBaja",
+  /// Gap de la matriz de requerimientos de Alsea (ver
+  /// docs/analisis-reunion-diego-arches-20260717.md §7.2 #1): modificar o
+  /// eliminar una línea que YA fue enviada a cocina requiere este permiso;
+  /// editar una línea que TODAVÍA no se envió sigue sin requerir permiso
+  /// (acción rutinaria de toma de pedido, igual que hold & fire F2-T2).
+  PEDIDO_MODIFICAR_ENVIADO: "pedido.modificarEnviado",
 } as const;
 
 export type ClavePermiso = (typeof PERMISOS)[keyof typeof PERMISOS];

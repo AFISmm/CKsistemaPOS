@@ -5,6 +5,7 @@ import { PrismaService } from "../common/prisma/prisma.service";
 import { EventosService } from "../common/eventos/eventos.service";
 import { EVENTOS_DOMINIO, VentaConfirmadaPayload, VentaRevertidaPayload } from "../common/eventos/tipos-evento";
 import { SeguridadService } from "../seguridad/seguridad.service";
+import { PERMISOS, tienePermiso } from "../seguridad/permisos";
 import { ErrorDominio } from "../common/errores/error-dominio";
 import { esUuid, uuidv7 } from "../common/util/uuid";
 import { calcularTotales } from "./calculo-totales";
@@ -278,7 +279,20 @@ export class VentasService {
     }
   }
 
-  async actualizarLinea(pedidoId: string, lineaId: string, dto: ActualizarLineaDto) {
+  /**
+   * FIX (gap de la matriz de requerimientos de Alsea, ver
+   * docs/analisis-reunion-diego-arches-20260717.md §7.2 #1): antes de este
+   * fix, `asegurarEditable` solo miraba el ESTADO del Pedido completo
+   * (cobrado/cancelado) — un cajero podia editar cantidad o eliminar una
+   * LINEA especifica que YA estaba en preparacion en cocina
+   * (`linea.enviadaACocinaEn` no nulo) sin ningun permiso ni registro. Ahora,
+   * si la linea ya fue enviada, se exige `PEDIDO_MODIFICAR_ENVIADO` (permiso
+   * gerencial, ver seed) y la modificacion queda auditada
+   * (`lineaModificadaTrasEnvio`) con el antes/despues. Editar una linea que
+   * TODAVIA no se envio sigue sin requerir permiso (accion rutinaria, igual
+   * que hold & fire F2-T2) — el gate es por LINEA, no por pedido completo.
+   */
+  async actualizarLinea(pedidoId: string, lineaId: string, dto: ActualizarLineaDto, usuarioId: string | null = null) {
     const pedido = await this.obtenerPedidoOrThrow(pedidoId);
     this.asegurarEditable(pedido.estado, pedidoId);
 
@@ -287,6 +301,26 @@ export class VentasService {
       throw new ErrorDominio("linea_no_encontrada", `Linea ${lineaId} no existe en el pedido ${pedidoId}`, 404);
     }
 
+    if (linea.enviadaACocinaEn) {
+      const usuario = usuarioId ? await this.seguridad.obtenerUsuarioConPermisos(usuarioId) : null;
+      if (!usuario) {
+        throw new ErrorDominio(
+          "autorizacion_requerida",
+          "Modificar una linea ya enviada a cocina requiere un usuario autenticado con permiso",
+          401,
+        );
+      }
+      if (!tienePermiso(usuario.permisos, PERMISOS.PEDIDO_MODIFICAR_ENVIADO)) {
+        throw new ErrorDominio(
+          "permiso_insuficiente",
+          `El usuario ${usuarioId} no tiene permiso para modificar una linea ya enviada a cocina`,
+          403,
+        );
+      }
+    }
+
+    const estadoAntes = { cantidad: linea.cantidad, descripcion: linea.descripcion };
+
     if (dto.eliminar) {
       await this.prisma.lineaDePedido.delete({ where: { id: lineaId } });
     } else if (dto.cantidad !== undefined) {
@@ -294,6 +328,20 @@ export class VentasService {
       await this.prisma.lineaDePedido.update({
         where: { id: lineaId },
         data: { cantidad: dto.cantidad, subtotalLinea },
+      });
+    }
+
+    if (linea.enviadaACocinaEn) {
+      await this.seguridad.registrarAuditoria({
+        ubicacionId: pedido.ubicacionId,
+        usuarioId,
+        tipo: "lineaModificadaTrasEnvio",
+        agregadoTipo: "LineaDePedido",
+        agregadoId: lineaId,
+        motivo: dto.eliminar
+          ? "Linea eliminada tras haber sido enviada a cocina"
+          : "Cantidad de linea modificada tras haber sido enviada a cocina",
+        payload: { pedidoId, ...estadoAntes, cantidadNueva: dto.cantidad ?? null, eliminada: !!dto.eliminar },
       });
     }
 

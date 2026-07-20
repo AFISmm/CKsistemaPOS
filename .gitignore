@@ -38,3 +38,4 @@ yarn-error.log*
 # se versiona en docs/analisis-*.md
 *.mp4
 POS.docx
+Matriz Funcional POS.xlsx

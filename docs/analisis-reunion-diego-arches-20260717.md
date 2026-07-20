@@ -103,3 +103,41 @@ Se implementó el punto 3.1 (BOM multinivel para productos elaborados/intermedio
 - **Facturación electrónica obligatoria ante una entidad gubernamental** — no existe ese mandato en EE.UU. (ya confirmado en Fase 0).
 - **Voucher de aerolíneas, multi-moneda en aeropuertos** — Chicken Kitchen no opera en aeropuertos en el MVP; no aplica al piloto de Miami.
 - **NT9 / arquitectura on-premise en un data center físico propio** — ya superado por nuestra decisión de Store Server por tienda + nube (ADR-0001), que es estrictamente mejor para el caso de 30 tiendas distribuidas.
+
+---
+
+## 7. Addendum (2026-07-20) — Matriz de requerimientos funcionales (`Matriz Funcional POS.xlsx`)
+
+Diego compartió la matriz que ofreció en la reunión: **120 requerimientos funcionales reales** de la evaluación de proveedores de Alsea, organizados en 3 áreas (FRONT, BACKOFFICE, TÉCNICO) con una columna de observaciones del propio equipo de Alsea sobre cómo cada ítem se resolvió en producción. Es un documento de RFP real, no una lista genérica — se cruzó fila por fila contra el diseño y el código actual de Chicken Kitchen. El archivo original (`Matriz Funcional POS.xlsx`) **no se conserva en el repo** (excluir explícitamente si se agrega al `.gitignore` en el futuro — por ahora no se commiteó), solo este análisis.
+
+### 7.1 Fuerte validación adicional (sin acción requerida)
+
+- **Arquitectura cliente-servidor centralizada + modo offline + P2P entre terminales** — la sección 3.2 de la matriz (TÉCNICO/ARQUITECTURA) describe punto por punto lo que Alsea terminó construyendo, marcado por ellos mismos como "Cumple con la arquitectura". Es prácticamente idéntico a ADR-0001/ADR-0002. La única diferencia real: sus terminales podían hablar peer-to-peer entre sí como respaldo si el servidor caía; las nuestras no (van siempre al Store Server), pero mitigamos el mismo riesgo con la cola offline en IndexedDB (F1-T3) — una solución distinta al mismo problema, no un gap.
+- **Consola de administración central con jerarquías (país/región/marca) y aplicación calendarizada de cambios** (matriz 3.1) — es exactamente lo que ya está planeado como F5-T1 ("Consola central multi-tienda + catálogo maestro") en `PLAN_DE_PRODUCCION.md`. Confirma que es la funcionalidad correcta a construir cuando llegue esa fase, no antes.
+- **Canales online/delivery resueltos por un sistema externo ("Ordering"), no por el POS mismo** (matriz 1.3, casi todas las observaciones dicen "ya funciona con Ordering") — confirma la decisión ya tomada en `docs/requisitos.md` §1.4 de que integraciones online/delivery quedan fuera del MVP.
+- **Lealtad (registro de clientes, frecuencia/consumo, tarjeta de regalo, puntos)** (matriz 1.4) — confirma que es exactamente el alcance de Gold Wing Club, ya diferido.
+- **Stack sin licenciamiento propietario, con acceso a código fuente y estructura de BD documentada** (matriz 3.3) — ya lo cumplimos por construcción (NestJS/Prisma/Postgres, código propio).
+
+### 7.2 Gaps nuevos, reales y accionables (no estaban identificados antes)
+
+| # | Gap | Evidencia en la matriz | Prioridad |
+|---|-----|------------------------|-----------|
+| 1 | **Autorización requerida para modificar/eliminar una línea que YA fue enviada a cocina** | Fila "Candados de autorización... Autorización para modificar una orden que ya fue enviada a cocina" (matriz 1.1) | **Alta — se implementa en este mismo pase** (ver §7.3). Verificado en el código: `VentasService.actualizarLinea` hoy solo bloquea si el PEDIDO completo está cobrado/cancelado, nunca si la LÍNEA específica ya se envió a cocina — un cajero puede hoy borrar o cambiar la cantidad de un plato que la cocina ya está preparando, sin ningún permiso ni auditoría. |
+| 2 | **Control de lotes y caducidad para insumos** | Fila "Control de lotes y caducidades" (matriz 2.1) — coincide EXACTAMENTE con lo que Diego ya había mencionado en la reunión (§3.3 de este documento) | Alta, pero de mayor alcance (requiere decisión de hardware de escaneo) — se mantiene como pregunta abierta ya documentada, ahora con doble confirmación (reunión + RFP formal) |
+| 3 | **Catálogo de alérgenos con omisión automática** | Fila "Manejo de alérgenos como funcionalidad" (matriz 1.2), con la observación explícita "Alérgenos es super importante" | Alta (seguridad alimentaria/legal), pero requiere datos reales de alérgenos por producto de Chicken Kitchen que no existen todavía — se documenta como nuevo supuesto (S-16), no se implementa con datos inventados |
+| 4 | **Reporte de uso Real vs. Ideal de inventario (variación de food cost)** | Fila "Uso diario del Inventario" (matriz 2.2): inventario inicial, repartido, usado real, uso ideal (por receta), variación real vs. ideal, costo real vs. costo ideal | Alta — ya tenemos TODOS los datos para esto (`Receta`/`RecetaInsumo` de F2-T1, movimientos de `Stock`) pero ningún reporte los cruza. Es el tipo de reporte que un gerente de operaciones usa constantemente para detectar merma/fraude no reportado (exactamente el problema que describió Felipe con Subway). **Se documenta como backlog de alto valor para F2-T3/futuro**, no se implementa en este pase por alcance (requiere diseñar qué es "uso ideal" con el nuevo BOM multinivel de S-14 ya en el sistema). |
+| 5 | **Depósitos y retiros parciales de caja durante el turno** | Fila "Manejo de Cortes, Depósitos y Retiros Parciales" (matriz 1.1) | Media — práctica común de control de pérdidas (cash drops), no modelada en `Turno` hoy (solo apertura/cierre). Backlog nuevo. |
+| 6 | **Respaldos locales y en la nube de PostgreSQL, con plan de mantenimiento de BD** | Filas "Funcionalidad de respaldos locales", "...en la nube", "Mantenimiento DB" (matriz 3.3) | **Alta — se implementa en este mismo pase** (ver §7.3). Es un gap real: en toda la Fase 0-3 de este proyecto nunca se documentó una estrategia de respaldo/recuperación para el Store Server, a pesar de que es la fuente de verdad operativa de la tienda (ADR-0001). |
+| 7 | **Redundancia automática de impresora/monitor KDS de respaldo** | Fila "Manejo de Monitores e Impresoras" — "se tiene la opción para asignar impresoras o monitores de respaldo... la orden se re-direcciona automáticamente" (matriz 1.2) | Media — hoy `EscPosImpresoraAdapter` (F2-T4) degrada a log si falla, pero no reintenta contra un segundo dispositivo configurado. Backlog para cuando haya hardware físico real que probar (F4-T1). |
+| 8 | **Política de retención/depuración de históricos + rotación de contraseñas/PIN** | Filas "Archivo y depuración de históricos programable", "Mantenimiento a Cuentas de Usuario" (matriz 3.3) | Media — ninguna de las dos existe hoy. Backlog para antes del piloto real (F4). |
+| 9 | **Costeo por última entrega vs. costo promedio ponderado** | Fila "diferentes presentaciones de entrega para un mismo artículo... tomando el precio de la última entrega o promediando los costos" (matriz 2.1) | Baja — refinamiento futuro de `CosteoService` (F2-T1); hoy `Insumo.costoUnitario` es un solo valor manual, suficiente para el MVP. |
+| 10 | **Costo real vs. ideal de labor (labor cost %)** | Fila "Manejo de costo Real e Ideal de Labor" (matriz 2.3) | Baja/futuro — depende de que `nomina-pos`/`rrhh-personal-pos` (hoy solo en la demo, nunca migrados a `store-server`) se integren con ventas; analítica futura, no MVP. |
+
+### 7.3 Qué se implementó en este mismo pase
+
+De los 10 gaps de §7.2, se implementaron los dos de **prioridad alta que son acotados, no requieren datos de negocio inventados, y no dependen de una decisión externa pendiente**:
+
+1. **Autorización para modificar/eliminar una línea ya enviada a cocina** (`store-server/src/ventas/*`).
+2. **Estrategia de respaldo de PostgreSQL** (script + documentación operativa, `store-server/scripts/` y `docs/operaciones/`).
+
+Los demás (alérgenos, lote/caducidad, uso real vs. ideal, depósitos parciales de caja, redundancia de impresora, retención de históricos, costeo por última entrega, costo de labor) quedan como backlog explícito — ver `docs/backlog.md` para el estado de cada uno.

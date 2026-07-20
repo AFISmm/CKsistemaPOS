@@ -141,7 +141,66 @@ Leyenda de estado: `PENDIENTE` · `EN CURSO` · `LISTO` · `BLOQUEADO` · `POSTE
 | S-15 — Motor de promociones condicionales/cupones | DOCUMENTADO, NO IMPLEMENTADO (deliberado) | Alcance mayor, diferido a cuando el proyecto llegue a Gold Wing Club/lealtad; lección de control de fraude ya incorporada al supuesto (ver requisitos.md S-15) |
 | Trazabilidad por lote/código de barras para bajas | PREGUNTA ABIERTA NUEVA | Requiere decisión de negocio (hardware de escaneo, umbral por insumo vs. agregado) antes de poder implementarse — ver requisitos.md pregunta 7 |
 | Mejoras de KDS (split-screen, expeditar, recuperar ticket, cola por SLA de canal) | BACKLOG FUTURO | Pertenece a `kds-cocina-pos`, no a `store-server`; el KDS de producción aún no se ha construido |
-| Matriz de ~120 requerimientos funcionales que Diego ofreció compartir | ACCIÓN DE SEGUIMIENTO (no técnica) | Pendiente que Felipe la solicite |
+| Matriz de ~120 requerimientos funcionales que Diego ofreció compartir | **RECIBIDA (2026-07-20)** | `Matriz Funcional POS.xlsx` — RFP real de Alsea, cruzada fila por fila contra el proyecto. Ver §7 del análisis y la tabla de gaps abajo |
+
+### Gaps identificados al cruzar la matriz de 120 requerimientos (2026-07-20)
+> Ver `docs/analisis-reunion-diego-arches-20260717.md` §7 para el detalle y la evidencia de cada fila de la matriz.
+| # | Gap | Estado |
+|---|-----|--------|
+| 1 | Autorización para modificar/eliminar una línea ya enviada a cocina | **LISTO** — `VentasService.actualizarLinea` ahora exige `PEDIDO_MODIFICAR_ENVIADO` (permiso gerencial) solo si `linea.enviadaACocinaEn` ya está seteado, y audita el cambio (`lineaModificadaTrasEnvio`); editar una línea aún no enviada sigue sin requerir permiso. Verificado por el orquestador: build limpio, 21 suites/170 unit tests, nueva suite de integración (`linea-modificar-enviada.integration.spec.ts`, 5 casos) compila y salta limpio (gap de entorno de siempre) |
+| 2 | Control de lotes y caducidad de insumos | Pregunta abierta (requisitos.md pregunta 7), doble confirmado por reunión + matriz |
+| 3 | Catálogo de alérgenos con omisión automática | Documentado como S-16 (requisitos.md) — requiere datos reales de Chicken Kitchen, no se inventan |
+| 4 | Reporte de uso Real vs. Ideal de inventario (variación de food cost) | BACKLOG ALTO VALOR — ya tenemos los datos (Receta/Stock), falta el reporte que los cruce; diferido por alcance |
+| 5 | Depósitos/retiros parciales de caja durante el turno (cash drops) | BACKLOG — no modelado en `Turno` hoy |
+| 6 | Respaldos locales + en la nube de PostgreSQL, plan de mantenimiento de BD | **LISTO** — implementado en este pase, ver entrega abajo |
+| 7 | Redundancia automática de impresora/monitor KDS de respaldo | BACKLOG — depende de hardware físico real (F4-T1) |
+| 8 | Política de retención/depuración de históricos + rotación de PIN | BACKLOG — antes del piloto (F4) |
+| 9 | Costeo por última entrega vs. costo promedio ponderado | BACKLOG BAJA — refinamiento futuro de F2-T1 |
+| 10 | Costo real vs. ideal de labor | BACKLOG BAJA/FUTURO — depende de migrar nómina/RRHH de la demo a `store-server` |
+
+### Entrega — Gap #6: Respaldo y recuperación de PostgreSQL (2026-07-20, `devops-despliegue-pos`)
+
+Tooling de operaciones (deliberadamente FUERA de `store-server/src/*` — es
+infraestructura, no código de la app NestJS):
+
+- `store-server/scripts/backup-local.sh`: `pg_dump -Fc` de la base indicada
+  por `DATABASE_URL` (misma variable que usa la app), verificación básica
+  del archivo con `pg_restore --list`, y poda automática con el esquema de
+  retención "diario denso + semanal esparcido".
+- `store-server/scripts/lib/retention.js` (+ `retention.d.ts`): la lógica de
+  qué respaldos borrar, factorizada como función pura (`calcularBackupsAEliminar`)
+  para poder testearla sin filesystem/Postgres — 11 tests en
+  `store-server/test/unit/backup-retention.spec.ts` (vacío, ventana diaria,
+  adelgazado semanal por semana ISO, política en cero, cruce de año, orden
+  de salida).
+- `store-server/scripts/backup-cloud-sync.sh`: copia (no espejo) del
+  respaldo hacia un destino fuera de sitio vía `rclone` (agnóstico de
+  proveedor — no hay cuenta de nube contratada todavía); se invoca
+  automáticamente desde `backup-local.sh` en modo best-effort.
+- `store-server/scripts/restore.sh`: restauración destructiva con `pg_restore
+  --clean --if-exists`, exige `--force` + confirmación interactiva
+  (`escribir "CONFIRMAR"`) o `CONFIRMAR_RESTORE=si` en modo no interactivo.
+- `docs/operaciones/respaldo-y-recuperacion-store-server.md`: por qué
+  importa, qué se respalda y con qué frecuencia (cada 4h, cron), dónde viven
+  los respaldos y por cuánto tiempo (local 7d densos + 4 semanas esparcidas;
+  nube sin retención propia, gestionada por el proveedor), runbook completo
+  de recuperación, y qué NO cubre (redundancia de servidor vivo = ADR-0008,
+  mantenimiento de performance de la BD, cifrado en reposo).
+- `store-server/.env.example`: `BACKUP_DIR`, `BACKUP_RETENCION_DIAS`,
+  `BACKUP_RETENCION_SEMANAS`, `BACKUP_CLOUD_DEST`, `BACKUP_CLOUD_AUTO`,
+  `RCLONE_CONFIG` documentadas con el mismo estilo comentado del resto del
+  archivo.
+
+**Verificado:** `bash -n` en los 3 scripts (sintaxis OK); los 11 tests
+nuevos + el resto de la suite unit pasan (22 suites/181 tests unit, sin
+regresiones). **NO verificado (honesto, no se puede en este entorno):**
+ejecución real contra PostgreSQL — este sandbox no tiene Docker/PostgreSQL/
+rclone instalados (`which pg_dump`/`which docker`/`which rclone` sin
+resultado). Ningún script corrió nunca contra una base real, y en particular
+**nunca se hizo un simulacro de restore real** — ver la sección 8 del
+documento operativo ("Qué falta validar con Postgres real") para la lista
+concreta de pasos pendientes antes del piloto, empezando por ese simulacro
+(un backup que nunca se restauró no es un backup confiable).
 
 ## Fase 1.5 — Andamiaje DEMO (orquestador)
 | Tarea | Dueño | Entregable | Estado |

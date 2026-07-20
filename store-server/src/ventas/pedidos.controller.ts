@@ -39,13 +39,20 @@ export class PedidosController {
     return this.ventas.agregarLinea(id, dto);
   }
 
+  /**
+   * Sin @RequierePermiso a nivel de metodo a proposito: el gate es POR LINEA
+   * (solo si `linea.enviadaACocinaEn` ya esta seteado), no por el endpoint
+   * completo — editar una linea que aun no se envio a cocina sigue siendo
+   * una accion rutinaria de cajero. Ver VentasService.actualizarLinea.
+   */
   @Patch(":id/lineas/:lineaId")
   actualizarLinea(
     @Param("id") id: string,
     @Param("lineaId") lineaId: string,
     @Body() dto: ActualizarLineaDto,
+    @Headers("x-usuario-id") usuarioId?: string,
   ) {
-    return this.ventas.actualizarLinea(id, lineaId, dto);
+    return this.ventas.actualizarLinea(id, lineaId, dto, usuarioId ?? null);
   }
 
   @Post(":id/enviar-cocina")
