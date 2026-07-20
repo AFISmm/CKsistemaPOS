@@ -19,6 +19,15 @@ import type {
 
 const ESTADOS_PEDIDO_CERRADOS: EstadoPedido[] = ["cobrado", "cancelado"];
 
+/**
+ * Cliente de Prisma o cliente de transaccion — permite a los metodos de
+ * lectura/calculo de abajo correr tanto sueltos (uso normal) como DENTRO de
+ * un `$transaction` (ver `registrarPagoEnPedido`, FIX de revision adversarial
+ * post-Fase 3: el pago necesitaba releer saldo/estado bajo lock, no solo
+ * antes de la transaccion).
+ */
+type DbClient = PrismaService | Prisma.TransactionClient;
+
 export interface RegistrarPagoInput {
   id?: string;
   metodo: "efectivo" | "tarjeta" | "otro";
@@ -51,8 +60,8 @@ export class VentasService {
 
   // ---------- Pedidos ----------
 
-  async obtenerPedidoOrThrow(pedidoId: string) {
-    const pedido = await this.prisma.pedido.findUnique({
+  async obtenerPedidoOrThrow(pedidoId: string, db: DbClient = this.prisma) {
+    const pedido = await db.pedido.findUnique({
       where: { id: pedidoId },
       include: { lineas: { include: { modificadores: true } }, pagos: true },
     });
@@ -293,27 +302,52 @@ export class VentasService {
     return this.obtenerPedidoOrThrow(pedidoId);
   }
 
-  /** Tasa acumulada (ej. estatal + local) de ReglaDeImpuesto vigente para la ubicacion. */
-  private async obtenerTasaImpuesto(ubicacionId: string): Promise<Decimal> {
+  /**
+   * Tasas acumuladas (ej. estatal + local) de ReglaDeImpuesto vigente para la
+   * ubicacion, separadas por `aplicaAExentos`.
+   *
+   * FIX (revision adversarial post-Fase 3): `aplicaAExentos` se guardaba y se
+   * sincronizaba desde la nube (src/sync/inbox.service.ts) pero ninguna
+   * consulta lo leia — una regla marcada para gravar items exentos no tenia
+   * NINGUN efecto. Ahora se devuelven dos tasas: `normal` (reglas con
+   * `aplicaAExentos=false`, el caso de siempre, se aplica solo sobre lineas
+   * gravables) y `sobreExentos` (reglas con `aplicaAExentos=true`, se aplica
+   * TAMBIEN sobre lineas `gravable=false` — ver `calcularTotales`).
+   */
+  private async obtenerTasasImpuesto(
+    ubicacionId: string,
+    db: DbClient = this.prisma,
+  ): Promise<{ normal: Decimal; sobreExentos: Decimal }> {
     const hoy = new Date();
-    const reglas = await this.prisma.reglaDeImpuesto.findMany({
+    const reglas = await db.reglaDeImpuesto.findMany({
       where: {
         ubicacionId,
         vigenteDesde: { lte: hoy },
         OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: hoy } }],
       },
     });
-    return reglas.reduce((acc, r) => acc.plus(new Decimal(r.tasa)), new Decimal(0));
+    const normal = reglas
+      .filter((r) => !r.aplicaAExentos)
+      .reduce((acc, r) => acc.plus(new Decimal(r.tasa)), new Decimal(0));
+    const sobreExentos = reglas
+      .filter((r) => r.aplicaAExentos)
+      .reduce((acc, r) => acc.plus(new Decimal(r.tasa)), new Decimal(0));
+    return { normal, sobreExentos };
   }
 
-  /** Recalcula y persiste subtotal/descuento/impuesto/propina/total (unica fuente de verdad). */
-  private async recalcularYPersistir(pedidoId: string): Promise<void> {
-    const pedido = await this.prisma.pedido.findUniqueOrThrow({
+  /**
+   * Recalcula y persiste subtotal/descuento/impuesto/propina/total (unica
+   * fuente de verdad). Acepta un cliente de transaccion opcional (`db`) para
+   * poder correr como parte de una operacion mas grande ya lockeada (ver
+   * `registrarPagoEnPedido`).
+   */
+  private async recalcularYPersistir(pedidoId: string, db: DbClient = this.prisma): Promise<void> {
+    const pedido = await db.pedido.findUniqueOrThrow({
       where: { id: pedidoId },
       include: { lineas: true, pagos: true },
     });
 
-    const tasa = await this.obtenerTasaImpuesto(pedido.ubicacionId);
+    const tasas = await this.obtenerTasasImpuesto(pedido.ubicacionId, db);
     const propinaTotal = pedido.pagos
       .filter((p) => p.estado === "aprobado")
       .reduce((acc, p) => acc.plus(new Decimal(p.propina)), new Decimal(0));
@@ -321,11 +355,12 @@ export class VentasService {
     const totales = calcularTotales({
       lineas: pedido.lineas.map((l) => ({ subtotalLinea: l.subtotalLinea, gravable: l.gravable })),
       descuentoTotal: pedido.descuentoTotal,
-      tasaImpuesto: tasa,
+      tasaImpuesto: tasas.normal,
+      tasaSobreExentos: tasas.sobreExentos,
       propinaTotal,
     });
 
-    await this.prisma.pedido.update({
+    await db.pedido.update({
       where: { id: pedidoId },
       data: {
         subtotal: totales.subtotal,
@@ -578,9 +613,13 @@ export class VentasService {
     }
   }
 
-  /** Saldo pendiente = (subtotal - descuento + impuesto) - pagos aprobados. La propina se paga aparte. */
-  async saldoPendiente(pedidoId: string): Promise<Decimal> {
-    const pedido = await this.obtenerPedidoOrThrow(pedidoId);
+  /**
+   * Saldo pendiente = (subtotal - descuento + impuesto) - pagos aprobados.
+   * La propina se paga aparte. Acepta `db` opcional para poder releerse bajo
+   * lock dentro de una transaccion (ver `registrarPagoEnPedido`).
+   */
+  async saldoPendiente(pedidoId: string, db: DbClient = this.prisma): Promise<Decimal> {
+    const pedido = await this.obtenerPedidoOrThrow(pedidoId, db);
     const montoAprobado = pedido.pagos
       .filter((p) => p.estado === "aprobado")
       .reduce((acc, p) => acc.plus(new Decimal(p.monto)), new Decimal(0));
@@ -594,46 +633,87 @@ export class VentasService {
    * VentasService sigue siendo el UNICO que decide si el pedido pasa a
    * "cobrado" segun el saldo. Si el pedido queda saldado, emite
    * VentaConfirmada (consumida por InventarioModule para descontar stock).
+   *
+   * FIX CRITICO (revision adversarial post-Fase 3): antes, el chequeo de
+   * saldo/estado (en `PagosService.procesarPago`) y la escritura del Pago
+   * aqui no eran atomicos entre si — dos `POST /api/v1/pagos` concurrentes
+   * para el mismo pedido podian ambos leer el mismo saldo, ambos ser
+   * autorizados (el PSP real cobraria DOS VECES), y solo el que ganara la
+   * carrera de escritura quedaba registrado; el segundo se enteraba recien
+   * aqui (`pedido_ya_cobrado`) DESPUES de que el cargo ya habia sido
+   * autorizado, y ese cargo huerfano no se revertia ni se auditaba en
+   * ningun lado. Ahora TODA la seccion critica (releer saldo/estado,
+   * insertar el Pago, recalcular totales, decidir si el pedido queda
+   * "cobrado") corre bajo un lock de fila (`SELECT ... FOR UPDATE` sobre el
+   * propio Pedido) dentro de una transaccion: la segunda transaccion
+   * concurrente queda bloqueada hasta que la primera confirma, y al re-leer
+   * ve el saldo YA actualizado — si ya no alcanza, se rechaza aqui con un
+   * codigo distinguible (`monto_excede_saldo_concurrente`) ANTES de crear el
+   * Pago, para que `PagosService` pueda reaccionar (intentar revertir el
+   * cargo del PSP si ya fue autorizado) en vez de perderlo silenciosamente.
    */
   async registrarPagoEnPedido(pedidoId: string, pago: RegistrarPagoInput) {
-    const pedido = await this.obtenerPedidoOrThrow(pedidoId);
-
-    if (pedido.estado === "cancelado") {
-      throw new ErrorDominio("pedido_cancelado", `El pedido ${pedidoId} esta cancelado`, 409);
-    }
-    if (pedido.estado === "cobrado") {
-      throw new ErrorDominio("pedido_ya_cobrado", `El pedido ${pedidoId} ya fue cobrado`, 409);
-    }
-
     const pagoId = pago.id && esUuid(pago.id) ? pago.id : uuidv7();
-    await this.prisma.pago.create({
-      data: {
-        id: pagoId,
-        pedidoId,
-        turnoId: pedido.turnoId,
-        metodo: pago.metodo,
-        monto: pago.monto,
-        propina: pago.propina,
-        estado: pago.estado,
-        pspTokenId: pago.pspTokenId ?? null,
-        pspReferencia: pago.pspReferencia ?? null,
-        ultimos4: pago.ultimos4 ?? null,
-        marca: pago.marca ?? null,
-        montoRecibido: pago.montoRecibido ?? null,
-        cambio: pago.cambio ?? null,
-      },
-    });
 
-    await this.recalcularYPersistir(pedidoId);
-    const saldo = await this.saldoPendiente(pedidoId);
+    const resultado = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "pedidos" WHERE id = ${pedidoId} FOR UPDATE`;
 
-    if (pago.estado === "aprobado" && saldo.lessThanOrEqualTo(0)) {
-      const actualizado = await this.prisma.pedido.update({
-        where: { id: pedidoId },
-        data: { estado: "cobrado", cerradoEn: new Date() },
-        include: { lineas: true },
+      const pedido = await this.obtenerPedidoOrThrow(pedidoId, tx);
+
+      if (pedido.estado === "cancelado") {
+        throw new ErrorDominio("pedido_cancelado", `El pedido ${pedidoId} esta cancelado`, 409);
+      }
+      if (pedido.estado === "cobrado") {
+        throw new ErrorDominio("pedido_ya_cobrado", `El pedido ${pedidoId} ya fue cobrado`, 409);
+      }
+
+      if (pago.estado === "aprobado") {
+        const saldoFresco = await this.saldoPendiente(pedidoId, tx);
+        const monto = new Decimal(pago.monto);
+        if (monto.greaterThan(saldoFresco)) {
+          throw new ErrorDominio(
+            "monto_excede_saldo_concurrente",
+            `El saldo del pedido cambio por un pago concurrente; monto (${monto.toString()}) ya no cabe en el saldo actual (${saldoFresco.toString()})`,
+            409,
+            { saldoActual: saldoFresco.toString() },
+          );
+        }
+      }
+
+      await tx.pago.create({
+        data: {
+          id: pagoId,
+          pedidoId,
+          turnoId: pedido.turnoId,
+          metodo: pago.metodo,
+          monto: pago.monto,
+          propina: pago.propina,
+          estado: pago.estado,
+          pspTokenId: pago.pspTokenId ?? null,
+          pspReferencia: pago.pspReferencia ?? null,
+          ultimos4: pago.ultimos4 ?? null,
+          marca: pago.marca ?? null,
+          montoRecibido: pago.montoRecibido ?? null,
+          cambio: pago.cambio ?? null,
+        },
       });
 
+      await this.recalcularYPersistir(pedidoId, tx);
+      const saldo = await this.saldoPendiente(pedidoId, tx);
+
+      if (pago.estado === "aprobado" && saldo.lessThanOrEqualTo(0)) {
+        const actualizado = await tx.pedido.update({
+          where: { id: pedidoId },
+          data: { estado: "cobrado", cerradoEn: new Date() },
+          include: { lineas: true },
+        });
+        return { actualizado };
+      }
+      return { actualizado: null };
+    });
+
+    if (resultado.actualizado) {
+      const actualizado = resultado.actualizado;
       const payload: VentaConfirmadaPayload = {
         pedidoId: actualizado.id,
         ubicacionId: actualizado.ubicacionId,
@@ -769,39 +849,55 @@ export class VentasService {
 
   // ---------- Turnos ----------
 
+  /**
+   * FIX (revision adversarial post-Fase 3): el chequeo original
+   * (`findFirst` de turno abierto, luego `create`) no era atomico — dos
+   * `POST /api/v1/turnos` casi simultaneos para la misma ubicacion podian
+   * pasar ambos el chequeo antes de que cualquiera creara su Turno,
+   * dejando DOS turnos abiertos concurrentes (arqueo/reportes asumen uno
+   * solo). Se serializa la seccion critica tomando un lock de fila
+   * (`SELECT ... FOR UPDATE`) sobre la propia `Ubicacion` dentro de una
+   * transaccion: la segunda transaccion concurrente queda bloqueada hasta
+   * que la primera confirma (o revierte) su turno, y al re-consultar ve el
+   * turno recien creado. No requiere una columna/constraint nueva.
+   */
   async abrirTurno(input: { ubicacionId: string; usuarioAperturaId: string; fondoInicial?: number }) {
-    const existente = await this.prisma.turno.findFirst({
-      where: { ubicacionId: input.ubicacionId, estado: "abierto" },
-    });
-    if (existente) {
-      throw new ErrorDominio(
-        "turno_ya_abierto",
-        `Ya existe un turno abierto (${existente.id}) para la ubicacion ${input.ubicacionId}`,
-        409,
-      );
-    }
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "ubicaciones" WHERE id = ${input.ubicacionId} FOR UPDATE`;
 
-    const turno = await this.prisma.turno.create({
-      data: {
-        id: uuidv7(),
+      const existente = await tx.turno.findFirst({
+        where: { ubicacionId: input.ubicacionId, estado: "abierto" },
+      });
+      if (existente) {
+        throw new ErrorDominio(
+          "turno_ya_abierto",
+          `Ya existe un turno abierto (${existente.id}) para la ubicacion ${input.ubicacionId}`,
+          409,
+        );
+      }
+
+      const turno = await tx.turno.create({
+        data: {
+          id: uuidv7(),
+          ubicacionId: input.ubicacionId,
+          usuarioAperturaId: input.usuarioAperturaId,
+          fondoInicial: input.fondoInicial ?? 0,
+          estado: "abierto",
+        },
+      });
+
+      await this.seguridad.registrarAuditoria({
         ubicacionId: input.ubicacionId,
-        usuarioAperturaId: input.usuarioAperturaId,
-        fondoInicial: input.fondoInicial ?? 0,
-        estado: "abierto",
-      },
-    });
+        usuarioId: input.usuarioAperturaId,
+        tipo: "aperturaTurno",
+        agregadoTipo: "Turno",
+        agregadoId: turno.id,
+        motivo: "Apertura de turno",
+        payload: { fondoInicial: turno.fondoInicial.toString() },
+      });
 
-    await this.seguridad.registrarAuditoria({
-      ubicacionId: input.ubicacionId,
-      usuarioId: input.usuarioAperturaId,
-      tipo: "aperturaTurno",
-      agregadoTipo: "Turno",
-      agregadoId: turno.id,
-      motivo: "Apertura de turno",
-      payload: { fondoInicial: turno.fondoInicial.toString() },
+      return turno;
     });
-
-    return turno;
   }
 
   async obtenerTurnoOrThrow(turnoId: string) {
@@ -848,6 +944,15 @@ export class VentasService {
         efectivo: resultado.porMetodo.efectivo.toString(),
         tarjeta: resultado.porMetodo.tarjeta.toString(),
         otro: resultado.porMetodo.otro.toString(),
+      },
+      // FIX (revision adversarial post-Fase 3): reembolsos POR METODO (no solo
+      // efectivo) para que `porMetodo` (bruto) y `totalVentas` (neto de
+      // reembolsos, ya que el pedido pasa a "cancelado") reconcilien entre si
+      // en el reporte Z — `porMetodo.X - reembolsadoPorMetodo.X` es el neto real.
+      reembolsadoPorMetodo: {
+        efectivo: resultado.reembolsadoPorMetodo.efectivo.toString(),
+        tarjeta: resultado.reembolsadoPorMetodo.tarjeta.toString(),
+        otro: resultado.reembolsadoPorMetodo.otro.toString(),
       },
       fondoInicial: resultado.fondoInicial.toString(),
       efectivoReembolsado: resultado.efectivoReembolsado.toString(),

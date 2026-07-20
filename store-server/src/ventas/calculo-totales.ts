@@ -33,8 +33,21 @@ export interface CalcularTotalesInput {
   lineas: LineaParaCalculo[];
   /** Descuento ya fijado (monto en dolares); se acota internamente a [0, subtotal]. */
   descuentoTotal: Decimal | number | string;
-  /** Tasa decimal de ReglaDeImpuesto vigente, ej 0.0825 = 8.25%. 0 si no hay regla. */
+  /**
+   * Tasa combinada de las `ReglaDeImpuesto` vigentes con `aplicaAExentos=false`
+   * (el caso normal): se aplica solo sobre `baseGravable`. Ej 0.0825 = 8.25%.
+   */
   tasaImpuesto: Decimal | number | string;
+  /**
+   * FIX (revision adversarial post-Fase 3): tasa combinada de las
+   * `ReglaDeImpuesto` vigentes con `aplicaAExentos=true` — reglas locales que
+   * SI gravan lineas marcadas `gravable=false` (el campo existia en el
+   * modelo/sync desde Fase 1 pero ningun calculo lo consultaba). Se aplica
+   * sobre la base EXENTA (tras descuento prorrateado), nunca sobre la
+   * gravable (que ya paga `tasaImpuesto`). Default 0 si no hay ninguna regla
+   * asi configurada (comportamiento identico al de antes de este fix).
+   */
+  tasaSobreExentos?: Decimal | number | string;
   /** Propina ya cobrada (suma de Pagos aprobados); NO genera impuesto (RN-02). */
   propinaTotal: Decimal | number | string;
 }
@@ -66,8 +79,16 @@ export function calcularTotales(input: CalcularTotalesInput): TotalesPedido {
   const descuentoSobreGravable = redondearCentavo(descuentoTotal.mul(proporcionGravable));
   const baseGravable = Decimal.max(subtotalGravable.minus(descuentoSobreGravable), new Decimal(0));
 
+  // Base exenta = el resto del subtotal (lineas gravable=false), tras su parte
+  // proporcional del descuento — mismo prorrateo que baseGravable, nunca se
+  // vuelve a descontar lo mismo dos veces (las dos proporciones suman 1).
+  const subtotalExento = subtotal.minus(subtotalGravable);
+  const descuentoSobreExento = redondearCentavo(descuentoTotal.minus(descuentoSobreGravable));
+  const baseExenta = Decimal.max(subtotalExento.minus(descuentoSobreExento), new Decimal(0));
+
   const tasa = new Decimal(input.tasaImpuesto);
-  const impuestoTotal = redondearCentavo(baseGravable.mul(tasa));
+  const tasaSobreExentos = new Decimal(input.tasaSobreExentos ?? 0);
+  const impuestoTotal = redondearCentavo(baseGravable.mul(tasa).plus(baseExenta.mul(tasaSobreExentos)));
 
   const propinaTotal = redondearCentavo(new Decimal(input.propinaTotal));
 

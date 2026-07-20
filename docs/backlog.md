@@ -103,6 +103,32 @@ Leyenda de estado: `PENDIENTE` · `EN CURSO` · `LISTO` · `BLOQUEADO` · `POSTE
 > declarado. Sin colisiones de esquema Prisma entre F3-T1 y F3-T2 (F3-T2 no tocó
 > `schema.prisma`, decisión deliberada del agente para evitar el riesgo).
 
+## Revisión adversarial post-Fase 3 (2026-07-19) — hallazgos y correcciones
+> Tras publicar Fases 0-3 a GitHub/Vercel, se hizo una revisión adversarial dedicada
+> del código de `store-server` (no solo "¿compila y pasan sus propios tests?", sino
+> "¿la lógica es correcta bajo concurrencia/seguridad?"). 8 hallazgos confirmados
+> (verificados leyendo el código exacto, no solo reportados), **los 8 corregidos**
+> en el mismo pase. Ver commit correspondiente para el diff completo.
+
+| # | Hallazgo | Severidad | Corrección |
+|---|----------|-----------|------------|
+| 1 | `POST /api/v1/pagos` sin transacción/lock: dos pagos concurrentes para el mismo pedido podían autorizar un cargo con tarjeta DOS VECES y perder el segundo cargo sin auditar ni revertir | **CRÍTICO** | `VentasService.registrarPagoEnPedido` ahora corre bajo `SELECT ... FOR UPDATE` sobre el Pedido dentro de una transacción; si el saldo cambió por una carrera, `PagosService` detecta el conflicto y **revierte automáticamente el cargo del PSP ya autorizado**, auditando el resultado (éxito o anomalía que requiere reconciliación manual) |
+| 2 | `SolicitudBaja.aprobarBaja`/`rechazarBaja` sin protección de concurrencia: doble clic podía decrementar Stock dos veces para una sola merma | ALTO | Reclamo atómico (`updateMany` condicionado a `estado:"pendiente"`) antes de mover stock; la segunda solicitud concurrente recibe 409, nunca duplica el movimiento |
+| 3 | `ReglaDeImpuesto.aplicaAExentos` se sincronizaba desde la nube pero ningún cálculo lo leía — una regla fiscal configurada para gravar ítems exentos no tenía efecto | ALTO | El motor de impuestos ahora separa tasa normal (solo gravables) de tasa sobre exentos (aplica también a `gravable=false`), con 3 tests nuevos |
+| 4 | `GET /turnos/:id/arqueo` sin ningún permiso ni autenticación, a diferencia de `reportes`/`costeo` que exponen datos similares | MEDIO (seguridad) | Requiere `REPORTE_VER`, mismo criterio que los endpoints hermanos |
+| 5 | `PEDIDO_CREAR`/`PEDIDO_COBRAR` definidos en el catálogo de permisos pero nunca exigidos en `POST /pedidos`/`POST /pagos` | MEDIO (seguridad) | Ambos endpoints ahora exigen su permiso correspondiente (ya otorgado a `cajero` en el seed, sin romper el flujo normal) |
+| 6 | `GET /stock`/`/stock/bajo-umbral` con `ubicacionId` opcional: devolvía inventario de TODAS las tiendas si se omitía | MEDIO (C-TENANT) | `ubicacionId` ahora obligatorio (422 si falta), mismo criterio ya aplicado en `reportes.service.ts` |
+| 7 | `abrirTurno` sin atomicidad: dos aperturas casi simultáneas podían crear dos turnos abiertos para la misma tienda | MEDIO | Lock de fila sobre `Ubicacion` dentro de una transacción serializa la apertura |
+| 8 | El reporte Z no reflejaba reembolsos con tarjeta/otro método: `porMetodo` (bruto) y `totalVentas` (neto) dejaban de reconciliar tras un reembolso con tarjeta | BAJO-MEDIO | Nuevo campo `reembolsadoPorMetodo` (por todos los métodos, no solo efectivo), mismo patrón ya usado para `efectivoReembolsado` |
+
+> **Verificado, no solo reportado:** tras aplicar las 8 correcciones, el orquestador
+> corrió `npm run build` (limpio), `npm run test:unit` (**19 suites, 157/157 tests**,
+> incluye 3 tests unitarios nuevos para los hallazgos #1/#2/#3/#8) y
+> `npm run test:integration` (7 suites/31 tests, sigue saltando limpio por falta de
+> Postgres/Docker en este entorno — mismo gap documentado en toda la Fase 1-3).
+> `git status` confirma que solo se tocaron los archivos de `store-server`
+> directamente relacionados con cada hallazgo.
+
 ## Fase 1.5 — Andamiaje DEMO (orquestador)
 | Tarea | Dueño | Entregable | Estado |
 |-------|-------|------------|--------|

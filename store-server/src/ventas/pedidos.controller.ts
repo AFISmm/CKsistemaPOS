@@ -19,6 +19,7 @@ export class PedidosController {
 
   @Post()
   @HttpCode(201)
+  @RequierePermiso(PERMISOS.PEDIDO_CREAR)
   crear(@Body() dto: CrearPedidoDto) {
     return this.ventas.crearPedido(dto, UBICACION_PILOTO_ID);
   }

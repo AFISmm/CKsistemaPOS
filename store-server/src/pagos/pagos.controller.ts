@@ -25,6 +25,7 @@ export class PagosController {
   constructor(private readonly pagos: PagosService) {}
 
   @Post()
+  @RequierePermiso(PERMISOS.PEDIDO_COBRAR)
   async registrar(
     @Body() dto: RegistrarPagoDto,
     @Res({ passthrough: true }) res: Response,

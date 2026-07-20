@@ -103,6 +103,8 @@ export class BajasService {
       );
     }
 
+    // Lecturas puras (sin efecto), ANTES del reclamo atomico de abajo: si
+    // fallan, la solicitud sigue "pendiente" y no queda ningun estado a medias.
     const insumo = await this.prisma.insumo.findUnique({ where: { id: solicitud.insumoId } });
     if (!insumo) {
       throw new ErrorDominio("insumo_no_encontrado", `Insumo ${solicitud.insumoId} no existe`, 422);
@@ -119,6 +121,32 @@ export class BajasService {
     // como proxy honesto de "valor de insumo recibido" (S-13).
     const valorBaseRecibido = new Decimal(stockAntes?.cantidadActual ?? 0).mul(costoUnitario);
 
+    // FIX (revision adversarial post-Fase 3): el chequeo de arriba
+    // (findUnique + comparar estado) por si solo NO evita que dos requests
+    // concurrentes (doble clic, dos dispositivos, o una carrera entre
+    // aprobar/rechazar) pasen ambas la validacion antes de que cualquiera
+    // escriba, decrementando Stock dos veces para una sola merma. Se cierra
+    // la ventana con un UPDATE atomico condicionado a `estado: "pendiente"`
+    // (Postgres solo deja a UNA transaccion concurrente ganar el WHERE de un
+    // UPDATE sobre la misma fila): esto "reclama" la solicitud justo antes de
+    // tocar stock, minimizando la ventana de un estado a medias si algo
+    // fallara despues. Si el conteo afectado es 0, alguien mas ya la reclamo
+    // entre nuestro findUnique inicial y este punto -> 409, nunca doble-mueve stock.
+    const reclamo = await this.prisma.solicitudBaja.updateMany({
+      where: { id, estado: "pendiente" },
+      data: { estado: "aprobada", revisadoPorId: gerenteId, revisadoEn: new Date() },
+    });
+    if (reclamo.count === 0) {
+      throw new ErrorDominio(
+        "solicitud_baja_ya_revisada",
+        `La solicitud ${id} ya fue revisada por otra solicitud concurrente`,
+        409,
+      );
+    }
+
+    // Ya somos el UNICO reclamante (ver arriba): a partir de aqui no hay
+    // race posible sobre ESTA solicitud, solo falta mover stock y guardar
+    // el valor calculado (el estado "aprobada" ya quedo escrito en el reclamo).
     await this.inventario.registrarMermaAprobada({
       ubicacionId: solicitud.ubicacionId,
       insumoId: solicitud.insumoId,
@@ -135,12 +163,7 @@ export class BajasService {
 
     const actualizada = await this.prisma.solicitudBaja.update({
       where: { id },
-      data: {
-        estado: "aprobada",
-        revisadoPorId: gerenteId,
-        revisadoEn: new Date(),
-        valorEstimado: valorEstaAprobacion,
-      },
+      data: { valorEstimado: valorEstaAprobacion },
     });
 
     await this.evaluarUmbralYAuditar({
@@ -175,8 +198,11 @@ export class BajasService {
       );
     }
 
-    const actualizada = await this.prisma.solicitudBaja.update({
-      where: { id },
+    // Mismo fix de reclamo atomico que `aprobarBaja` (ver comentario ahi):
+    // cierra la carrera aprobar-vs-rechazar sobre la MISMA solicitud, no solo
+    // rechazar-vs-rechazar.
+    const reclamo = await this.prisma.solicitudBaja.updateMany({
+      where: { id, estado: "pendiente" },
       data: {
         estado: "rechazada",
         revisadoPorId: gerenteId,
@@ -184,6 +210,15 @@ export class BajasService {
         motivoRechazo: motivoRechazo ?? null,
       },
     });
+    if (reclamo.count === 0) {
+      throw new ErrorDominio(
+        "solicitud_baja_ya_revisada",
+        `La solicitud ${id} ya fue revisada por otra solicitud concurrente`,
+        409,
+      );
+    }
+
+    const actualizada = await this.prisma.solicitudBaja.findUniqueOrThrow({ where: { id } });
 
     await this.seguridad.registrarAuditoria({
       ubicacionId: solicitud.ubicacionId,

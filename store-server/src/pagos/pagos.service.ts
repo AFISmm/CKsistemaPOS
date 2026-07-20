@@ -137,19 +137,82 @@ export class PagosService {
       });
     }
 
-    await this.ventas.registrarPagoEnPedido(dto.pedidoId, {
-      id: pagoId,
-      metodo: dto.metodo,
-      monto,
-      propina,
-      estado,
-      pspTokenId,
-      pspReferencia,
-      ultimos4,
-      marca,
-      montoRecibido,
-      cambio,
-    });
+    try {
+      await this.ventas.registrarPagoEnPedido(dto.pedidoId, {
+        id: pagoId,
+        metodo: dto.metodo,
+        monto,
+        propina,
+        estado,
+        pspTokenId,
+        pspReferencia,
+        ultimos4,
+        marca,
+        montoRecibido,
+        cambio,
+      });
+    } catch (err) {
+      // FIX CRITICO (revision adversarial post-Fase 3): `registrarPagoEnPedido`
+      // ahora releva el saldo bajo lock (ver ese metodo) y puede rechazar el
+      // pago con "monto_excede_saldo_concurrente" si otro pago concurrente ya
+      // saldo/redujo el pedido entre el chequeo de arriba y la escritura. Para
+      // TARJETA, en ese punto el PSP YA autorizo el cargo (linea 91-101) — sin
+      // esto, ese cargo quedaba huerfano: cobrado de verdad pero nunca
+      // persistido ni revertido (el bug original). Aqui se intenta revertir
+      // de inmediato y se audita el resultado, en vez de perder el cargo en
+      // silencio.
+      if (
+        err instanceof ErrorDominio &&
+        err.codigo === "monto_excede_saldo_concurrente" &&
+        dto.metodo === "tarjeta" &&
+        estado === "aprobado" &&
+        pspReferencia
+      ) {
+        let reversionOk = false;
+        let mensajeReversion = "";
+        try {
+          const reversion = await this.psp.reembolsar(pspReferencia, monto.plus(propina).toString());
+          reversionOk = reversion.aprobado;
+          mensajeReversion = reversion.mensaje;
+        } catch (errReversion) {
+          mensajeReversion = (errReversion as Error).message;
+        }
+
+        await this.seguridad.registrarAuditoria({
+          ubicacionId: pedido.ubicacionId,
+          usuarioId,
+          tipo: "reembolso",
+          agregadoTipo: "Pedido",
+          agregadoId: pedido.id,
+          motivo: reversionOk
+            ? "Cargo con tarjeta autorizado pero saldo del pedido cambio por un pago concurrente: reversion automatica OK"
+            : "ANOMALIA: cargo con tarjeta autorizado, saldo cambio por pago concurrente, Y la reversion automatica FALLO — requiere revision manual con el PSP",
+          payload: {
+            pedidoId: dto.pedidoId,
+            pspReferencia,
+            monto: monto.toString(),
+            reversionOk,
+            mensajeReversion,
+          },
+        });
+
+        if (!reversionOk) {
+          this.logger.error(
+            `ANOMALIA DE PAGO: cargo con tarjeta (pspReferencia=${pspReferencia}, pedido=${dto.pedidoId}) autorizado pero no persistido (carrera de pago concurrente) Y la reversion automatica fallo: ${mensajeReversion}. Requiere reconciliacion manual con el PSP.`,
+          );
+        }
+
+        throw new ErrorDominio(
+          "pago_concurrente_revertido",
+          reversionOk
+            ? "El saldo del pedido cambio por un pago concurrente; el cargo con tarjeta ya autorizado fue revertido automaticamente. Intente de nuevo."
+            : "El saldo del pedido cambio por un pago concurrente y la reversion automatica del cargo con tarjeta FALLO. No reintente sin verificar con soporte — requiere reconciliacion manual con el PSP.",
+          reversionOk ? 409 : 502,
+          { pspReferencia, reversionOk },
+        );
+      }
+      throw err;
+    }
 
     await this.eventos.emitir({
       tipo: EVENTOS_DOMINIO.PAGO_REGISTRADO,

@@ -25,6 +25,20 @@
  * corrige sin tocar el pedido/pago original (el pago aprobado original sigue
  * contando como venta bruta; el reembolso resta el efectivo que
  * fisicamente salio del cajon).
+ *
+ * FIX #2 (revision adversarial post-Fase 3): la correccion anterior solo
+ * restaba reembolsos de EFECTIVO (`efectivoReembolsado`); un reembolso con
+ * TARJETA (u "otro") no se reflejaba en ningun lado de este calculo —
+ * `porMetodo.tarjeta` seguia mostrando el cargo bruto original mientras
+ * `totalVentas` ya excluia el pedido (estado paso a "cancelado" al
+ * reembolsarse), asi que las dos cifras del mismo reporte Z dejaban de
+ * reconciliar entre si tras cualquier reembolso con tarjeta. Se agrega
+ * `reembolsadoPorMetodo` (por TODOS los metodos, no solo efectivo) siguiendo
+ * el mismo patron ya establecido de "bruto + reembolsado por separado" (en
+ * vez de netear `porMetodo` en el lugar, que perderia la cifra bruta
+ * original) — `efectivoReembolsado` se mantiene intacto (usado ademas para
+ * el calculo especifico de efectivo esperado en caja) y coincide con
+ * `reembolsadoPorMetodo.efectivo`.
  */
 import { Decimal } from "@prisma/client/runtime/library";
 import { decimal, type DineroInput } from "../common/util/dinero";
@@ -56,6 +70,8 @@ export interface ArqueoCalculado {
   totalImpuestos: Decimal;
   totalPropinas: Decimal;
   porMetodo: Record<MetodoPagoReporte, Decimal>;
+  /** FIX #2: reembolsado por metodo (TODOS, no solo efectivo) — ver comentario de archivo. */
+  reembolsadoPorMetodo: Record<MetodoPagoReporte, Decimal>;
   fondoInicial: Decimal;
   efectivoReembolsado: Decimal;
   efectivoEsperado: Decimal;
@@ -78,11 +94,15 @@ export function calcularArqueoTurno(input: {
     totalPropinas = totalPropinas.plus(decimal(pago.propina));
   }
 
-  let efectivoReembolsado = new Decimal(0);
+  const reembolsadoPorMetodo: Record<MetodoPagoReporte, Decimal> = {
+    efectivo: new Decimal(0),
+    tarjeta: new Decimal(0),
+    otro: new Decimal(0),
+  };
   for (const pago of input.pagosReembolsados) {
-    if (pago.metodo !== "efectivo") continue;
-    efectivoReembolsado = efectivoReembolsado.plus(decimal(pago.monto).abs());
+    reembolsadoPorMetodo[pago.metodo] = reembolsadoPorMetodo[pago.metodo].plus(decimal(pago.monto).abs());
   }
+  const efectivoReembolsado = reembolsadoPorMetodo.efectivo;
 
   const totalVentas = sumarCampo(input.pedidosCobrados, "total");
   const totalDescuentos = sumarCampo(input.pedidosCobrados, "descuentoTotal");
@@ -98,6 +118,7 @@ export function calcularArqueoTurno(input: {
     totalImpuestos,
     totalPropinas,
     porMetodo,
+    reembolsadoPorMetodo,
     fondoInicial,
     efectivoReembolsado,
     efectivoEsperado,

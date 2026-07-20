@@ -17,7 +17,13 @@ function crearMocks() {
   const solicitudBaja = {
     create: jest.fn(),
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
     update: jest.fn(),
+    // FIX (revision adversarial post-Fase 3): aprobar/rechazar ahora "reclaman"
+    // la solicitud con un updateMany atomico (where incluye estado:"pendiente")
+    // antes de tocar stock, para cerrar la carrera de doble-aprobacion. Default
+    // count:1 (reclamo exitoso); los tests de conflicto lo sobreescriben a 0.
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     findMany: jest.fn().mockResolvedValue([]),
   };
   const insumo = { findUnique: jest.fn() };
@@ -85,12 +91,39 @@ describe("BajasService — maquina de estados (F3-T1, sin DB)", () => {
     expect(registrarMermaAprobada).toHaveBeenCalledWith(
       expect.objectContaining({ ubicacionId: "ubic-test", insumoId: "insu-test", usuarioId: "user-gerente" }),
     );
-    expect(solicitudBaja.update).toHaveBeenCalledWith(
+    // El reclamo atomico (updateMany) es lo que marca "aprobada" + revisadoPorId,
+    // condicionado a que la fila SIGA en "pendiente" (cierra la carrera de doble-aprobacion).
+    expect(solicitudBaja.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "baja-1" },
+        where: { id: "baja-1", estado: "pendiente" },
         data: expect.objectContaining({ estado: "aprobada", revisadoPorId: "user-gerente" }),
       }),
     );
+    // El update final solo agrega el valor calculado (el estado ya lo puso el reclamo).
+    expect(solicitudBaja.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "baja-1" },
+        data: expect.objectContaining({ valorEstimado: expect.anything() }),
+      }),
+    );
+  });
+
+  it("aprobarBaja: si el reclamo atomico pierde la carrera (count 0), responde 409 y NO mueve stock", async () => {
+    const { prisma, solicitudBaja, insumo, ubicacion, stock, inventario, registrarMermaAprobada, seguridad } = crearMocks();
+    solicitudBaja.findUnique.mockResolvedValue({ ...SOLICITUD_PENDIENTE });
+    insumo.findUnique.mockResolvedValue({ id: "insu-test", costoUnitario: new Decimal(2) });
+    ubicacion.findUnique.mockResolvedValue({ id: "ubic-test", umbralMermaPorcentaje: new Decimal(3) });
+    stock.findUnique.mockResolvedValue({ cantidadActual: new Decimal(1000) });
+    // Simula que otra request concurrente ya reclamo la solicitud entre el
+    // findUnique inicial y el updateMany atomico de este request.
+    solicitudBaja.updateMany.mockResolvedValue({ count: 0 });
+
+    const service = new BajasService(prisma, inventario, seguridad);
+    await expect(service.aprobarBaja("baja-1", "user-gerente")).rejects.toMatchObject({
+      codigo: "solicitud_baja_ya_revisada",
+      status: 409,
+    });
+    expect(registrarMermaAprobada).not.toHaveBeenCalled();
   });
 
   it("aprobar una solicitud YA aprobada responde 409 (no un no-op silencioso) y NO mueve stock de nuevo", async () => {
@@ -120,7 +153,11 @@ describe("BajasService — maquina de estados (F3-T1, sin DB)", () => {
   it("rechazarBaja sobre una solicitud pendiente la marca 'rechazada' y NUNCA mueve stock", async () => {
     const { prisma, solicitudBaja, inventario, registrarMermaAprobada, seguridad, registrarAuditoria } = crearMocks();
     solicitudBaja.findUnique.mockResolvedValue({ ...SOLICITUD_PENDIENTE });
-    solicitudBaja.update.mockResolvedValue({ ...SOLICITUD_PENDIENTE, estado: "rechazada", motivoRechazo: "duplicado" });
+    solicitudBaja.findUniqueOrThrow.mockResolvedValue({
+      ...SOLICITUD_PENDIENTE,
+      estado: "rechazada",
+      motivoRechazo: "duplicado",
+    });
 
     const service = new BajasService(prisma, inventario, seguridad);
     const resultado: any = await service.rechazarBaja("baja-1", "user-gerente", "duplicado");
@@ -128,6 +165,22 @@ describe("BajasService — maquina de estados (F3-T1, sin DB)", () => {
     expect(resultado.estado).toBe("rechazada");
     expect(registrarMermaAprobada).not.toHaveBeenCalled();
     expect(registrarAuditoria).toHaveBeenCalledWith(expect.objectContaining({ tipo: "bajaRechazada" }));
+    expect(solicitudBaja.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "baja-1", estado: "pendiente" } }),
+    );
+  });
+
+  it("rechazarBaja: si el reclamo atomico pierde la carrera (count 0), responde 409", async () => {
+    const { prisma, solicitudBaja, inventario, registrarMermaAprobada, seguridad } = crearMocks();
+    solicitudBaja.findUnique.mockResolvedValue({ ...SOLICITUD_PENDIENTE });
+    solicitudBaja.updateMany.mockResolvedValue({ count: 0 });
+
+    const service = new BajasService(prisma, inventario, seguridad);
+    await expect(service.rechazarBaja("baja-1", "user-gerente")).rejects.toMatchObject({
+      codigo: "solicitud_baja_ya_revisada",
+      status: 409,
+    });
+    expect(registrarMermaAprobada).not.toHaveBeenCalled();
   });
 
   it("rechazar una solicitud YA revisada responde 409, no un no-op silencioso", async () => {

@@ -115,4 +115,51 @@ describe("calcularTotales", () => {
       expect(valor).toBeInstanceOf(Decimal);
     }
   });
+
+  describe("tasaSobreExentos (FIX revision adversarial post-Fase 3: aplicaAExentos)", () => {
+    it("sin tasaSobreExentos, una linea exenta nunca genera impuesto (comportamiento previo intacto)", () => {
+      const resultado = calcularTotales({
+        lineas: [
+          { subtotalLinea: "10.00", gravable: true },
+          { subtotalLinea: "5.00", gravable: false },
+        ],
+        descuentoTotal: 0,
+        tasaImpuesto: "0.07",
+        propinaTotal: 0,
+      });
+      // Solo la linea gravable paga impuesto: 10 * 0.07 = 0.70
+      expect(resultado.impuestoTotal.toString()).toBe("0.7");
+    });
+
+    it("con tasaSobreExentos, una regla aplicaAExentos=true SI grava la linea exenta, ademas de la normal sobre la gravable", () => {
+      const resultado = calcularTotales({
+        lineas: [
+          { subtotalLinea: "10.00", gravable: true },
+          { subtotalLinea: "5.00", gravable: false },
+        ],
+        descuentoTotal: 0,
+        tasaImpuesto: "0.07",
+        tasaSobreExentos: "0.02",
+        propinaTotal: 0,
+      });
+      // Gravable: 10 * 0.07 = 0.70. Exenta bajo la regla especial: 5 * 0.02 = 0.10. Total 0.80.
+      expect(resultado.impuestoTotal.toString()).toBe("0.8");
+    });
+
+    it("el descuento se prorratea correctamente entre base gravable y exenta antes de aplicar cada tasa", () => {
+      const resultado = calcularTotales({
+        lineas: [
+          { subtotalLinea: "10.00", gravable: true },
+          { subtotalLinea: "10.00", gravable: false },
+        ],
+        // 50% gravable / 50% exento -> el descuento de 4 se reparte 2/2
+        descuentoTotal: "4.00",
+        tasaImpuesto: "0.10",
+        tasaSobreExentos: "0.10",
+        propinaTotal: 0,
+      });
+      // baseGravable = 10 - 2 = 8; baseExenta = 10 - 2 = 8; impuesto = 0.8 + 0.8 = 1.6
+      expect(resultado.impuestoTotal.toString()).toBe("1.6");
+    });
+  });
 });

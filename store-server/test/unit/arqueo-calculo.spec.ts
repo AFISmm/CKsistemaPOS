@@ -48,6 +48,27 @@ describe("calcularArqueoTurno", () => {
     expect(resultado.efectivoEsperado.toString()).toBe("120"); // 100 + 20, el reembolso de tarjeta no resta
   });
 
+  it("FIX (revision adversarial post-Fase 3): un reembolso CON TARJETA SI se refleja en reembolsadoPorMetodo, para que porMetodo y totalVentas reconcilien", () => {
+    const resultado = calcularArqueoTurno({
+      fondoInicial: "0",
+      // El pedido reembolsado ya no cuenta como "cobrado" (paso a "cancelado"),
+      // por eso no aparece aqui: totalVentas correctamente lo excluye.
+      pedidosCobrados: [{ total: "20.00", descuentoTotal: "0", impuestoTotal: "0" }],
+      pagosAprobados: [
+        { metodo: "tarjeta", monto: "50.00", propina: "0" }, // el cargo original del pedido reembolsado
+        { metodo: "tarjeta", monto: "20.00", propina: "0" }, // otro pedido, este si sigue cobrado
+      ],
+      pagosReembolsados: [{ metodo: "tarjeta", monto: "-50.00" }],
+    });
+
+    expect(resultado.porMetodo.tarjeta.toString()).toBe("70"); // bruto: 50 + 20
+    expect(resultado.reembolsadoPorMetodo.tarjeta.toString()).toBe("50");
+    // Neto por metodo (bruto - reembolsado) SI reconcilia con totalVentas: 70 - 50 = 20 = totalVentas.
+    expect(resultado.porMetodo.tarjeta.minus(resultado.reembolsadoPorMetodo.tarjeta).toString()).toBe(
+      resultado.totalVentas.toString(),
+    );
+  });
+
   it("suma propinas y totales por metodo de pagos aprobados", () => {
     const resultado = calcularArqueoTurno({
       fondoInicial: "0",

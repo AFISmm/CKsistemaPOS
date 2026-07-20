@@ -32,9 +32,19 @@ export class InventarioService {
     private readonly seguridad: SeguridadService,
   ) {}
 
+  /**
+   * FIX (revision adversarial post-Fase 3, C-TENANT): `ubicacionId` era
+   * opcional y, si se omitia, devolvia el stock de TODAS las tiendas en una
+   * sola respuesta (la semilla tiene Miami FL + Austin TX reales) — misma
+   * fuga de datos entre tiendas que `reportes.service.ts` ya evita
+   * explicitamente exigiendo el parametro. Se alinea al mismo criterio.
+   */
   async listarStock(ubicacionId?: string) {
+    if (!ubicacionId) {
+      throw new ErrorDominio("ubicacion_requerida", "ubicacionId es requerido", 422);
+    }
     return this.prisma.stock.findMany({
-      where: ubicacionId ? { ubicacionId } : undefined,
+      where: { ubicacionId },
       include: { insumo: true },
       orderBy: { actualizadoEn: "desc" },
     });
@@ -197,10 +207,16 @@ export class InventarioService {
     }
   }
 
-  /** Lista de insumos por debajo (o igual) de su umbral de stock bajo. */
+  /**
+   * Lista de insumos por debajo (o igual) de su umbral de stock bajo.
+   * Mismo fix C-TENANT que `listarStock` (ver comentario ahi).
+   */
   async insumosBajoUmbral(ubicacionId?: string) {
+    if (!ubicacionId) {
+      throw new ErrorDominio("ubicacion_requerida", "ubicacionId es requerido", 422);
+    }
     const stockRelevante = await this.prisma.stock.findMany({
-      where: ubicacionId ? { ubicacionId } : undefined,
+      where: { ubicacionId },
       include: { insumo: true },
     });
     return stockRelevante
