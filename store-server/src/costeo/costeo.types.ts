@@ -141,3 +141,49 @@ export function calcularCostoLinea(input: CalcularCostoLineaInput): CosteoLinea 
     costoUnitarioLinea: cantidadLinea.isZero() ? "0" : costoTotalLinea.div(cantidadLinea).toString(),
   };
 }
+
+/**
+ * S-14 (BOM multinivel — productos elaborados/intermedios, ver
+ * docs/analisis-reunion-diego-arches-20260717.md §3.1 y docs/requisitos.md
+ * S-14). Funcion PURA (sin Prisma/DB, ver test/unit/costeo-elaborado.spec.ts)
+ * que resuelve el costo unitario REAL de un Insumo, recursivamente, cuando
+ * ese insumo es "elaborado" (se produce en tienda a partir de otros insumos
+ * base, ej. Salsa BBQ) en vez de comprarse ya listo.
+ *
+ * Precedencia documentada (S-14, punto 3 del enunciado): si `insumoId` tiene
+ * una entrada en `recetasElaboradas` (su Receta/RecetaInsumo VIGENTE, ya
+ * resuelta contra la DB por CosteoService), el costo se calcula SUMANDO
+ * cantidad*costo de CADA insumo base (recursivamente, por si ESE insumo base
+ * es a su vez otro elaborado) — la receta manda. `costosBaseConocidos` (el
+ * `Insumo.costoUnitario` cacheado/manual de CUALQUIER insumo) es SOLO el
+ * fallback: se usa cuando `insumoId` no aparece en `recetasElaboradas` (no es
+ * elaborado, o es elaborado pero todavia no tiene receta definida) o cuando
+ * `visitados` ya contiene a `insumoId` (ciclo detectado en tiempo de lectura
+ * — defensa en profundidad; el camino de ESCRITURA ya deberia haber
+ * rechazado ese ciclo con `detectarCicloReceta`, ver
+ * src/catalogo/receta-ciclo.ts, mismo principio de "nodo ya en la pila de
+ * recursion actual"). Un insumo ausente de AMBOS mapas cuesta 0 (igual
+ * criterio que `calcularCostoLinea`: nunca rompe el calculo, solo no aporta
+ * costo).
+ */
+export function resolverCostoUnitarioInsumo(
+  insumoId: string,
+  costosBaseConocidos: Map<string, Decimal>,
+  recetasElaboradas: Map<string, InsumoCantidad[]>,
+  visitados: Set<string> = new Set(),
+): Decimal {
+  const receta = recetasElaboradas.get(insumoId);
+  if (!receta || receta.length === 0 || visitados.has(insumoId)) {
+    return costosBaseConocidos.get(insumoId) ?? new Decimal(0);
+  }
+
+  const siguientesVisitados = new Set(visitados);
+  siguientesVisitados.add(insumoId);
+
+  let costoPorUnidad = new Decimal(0);
+  for (const item of receta) {
+    const costoBase = resolverCostoUnitarioInsumo(item.insumoId, costosBaseConocidos, recetasElaboradas, siguientesVisitados);
+    costoPorUnidad = costoPorUnidad.plus(item.cantidad.mul(costoBase));
+  }
+  return costoPorUnidad;
+}

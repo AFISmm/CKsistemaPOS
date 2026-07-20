@@ -111,6 +111,16 @@ enum TipoEventoAuditoria {
   /// umbral configurable (Ubicacion.umbralMermaPorcentaje). Visible al
   /// gerente de tienda (ver BajasService.evaluarUmbralYAuditar).
   alertaMerma
+  /// S-14 (BOM multinivel — productos elaborados/intermedios, ver
+  /// docs/analisis-reunion-diego-arches-20260717.md §3.1 y
+  /// docs/requisitos.md S-14): resumen auditable de UNA produccion de un
+  /// Insumo elaborado (ej. Salsa BBQ), emitido por
+  /// InventarioService.producirInsumoElaborado ADEMAS de los
+  /// "ajusteInventario" que ya escribe aplicarMovimiento por cada insumo
+  /// base consumido y por el insumo elaborado producido (mismo patron que
+  /// "alertaMerma" es una segunda auditoria sobre lo que ya audita
+  /// aplicarMovimiento).
+  produccionInsumoElaborado
 }
 
 /// Motivo controlado de una SolicitudBaja (F3-T1). Lista corta y cerrada
@@ -298,26 +308,68 @@ model Insumo {
   /// costeo por combinacion/BOM por variante). Campo aditivo: default 0 no
   /// rompe ninguna fila existente. Lo usa CosteoService para resolver el
   /// costo real de una linea vendida (nunca el precio al cliente, que sigue
-  /// viniendo de Producto/Modificador/Combo — C-SNAPSHOT no se toca).
+  /// viniendo de Producto/Modificador/Combo — C-SNAPSHOT no se toca). Para un
+  /// insumo con `esElaborado=true` este valor pasa a ser SOLO un fallback
+  /// cacheado/manual: el costo real se resuelve RECURSIVAMENTE via su propia
+  /// Receta/RecetaInsumo (ver CosteoService.resolverCostoUnitarioInsumo,
+  /// S-14) salvo que no tenga receta definida todavia o se detecte un ciclo,
+  /// casos en que se cae de vuelta a este campo.
   costoUnitario   Decimal @default(0) @db.Decimal(12, 4)
+  /// S-14 (BOM multinivel — productos elaborados/intermedios, ver
+  /// docs/analisis-reunion-diego-arches-20260717.md §3.1 y
+  /// docs/requisitos.md S-14): true si este Insumo se PRODUCE en tienda a
+  /// partir de otros insumos base (ej. Salsa BBQ) en vez de comprarse ya
+  /// listo. Campo aditivo (default false = comportamiento identico al
+  /// existente para TODO insumo no marcado). Permite al catalogo/UI
+  /// distinguir "comprar crudo" vs "se produce en tienda" sin tener que
+  /// hacer join contra Receta cada vez. No es la unica fuente de verdad de
+  /// "tiene receta definida" (eso lo decide la existencia de una Receta con
+  /// insumoElaboradoId=este.id y activo=true) pero SI es la que gobierna si
+  /// InventarioService.producirInsumoElaborado y CosteoService intentan
+  /// resolver una receta en primer lugar.
+  esElaborado     Boolean @default(false)
 
   recetaInsumos       RecetaInsumo[]
   recetaModificadores RecetaModificador[]
   stock               Stock[]
   solicitudesBaja     SolicitudBaja[]
+  /// S-14: recetas (normalmente una sola activa a la vez, igual criterio que
+  /// Producto.recetas) donde ESTE insumo es el insumo ELABORADO (el que se
+  /// produce), no un ingrediente base. Relacion nombrada porque Receta tiene
+  /// DOS FKs opcionales distintas hacia entidades distintas (Producto e
+  /// Insumo) — ver Receta.
+  recetasElaboracion  Receta[] @relation("RecetaDeInsumoElaborado")
 
   @@map("insumos")
 }
 
+/// Receta: BOM de UN Producto de menu O de UN Insumo elaborado (S-14, BOM
+/// multinivel — ver docs/analisis-reunion-diego-arches-20260717.md §3.1 y
+/// docs/requisitos.md S-14). Se reusa la MISMA tabla para ambos casos (en vez
+/// de una estructura paralela) porque RecetaInsumo ya modela exactamente lo
+/// que hace falta en los dos: "N unidades de este Insumo por unidad de lo que
+/// sea que esta Receta describe". Invariante de aplicacion (NO hay CHECK
+/// constraint de Postgres: este repo no genera migraciones sin Postgres real,
+/// ver seccion Tests del README): EXACTAMENTE uno de productoId/
+/// insumoElaboradoId esta definido por fila, nunca ambos ni ninguno. La
+/// verifica CatalogoService (crearReceta exige productoId;
+/// definirRecetaInsumoElaborado exige insumoElaboradoId y jamas toca
+/// productoId).
 model Receta {
   id         String  @id
-  productoId String
+  productoId String?
+  /// S-14: cuando esta fila describe la receta de un Insumo elaborado (ej.
+  /// Salsa BBQ) en vez de un Producto de menu. Null para toda Receta
+  /// preexistente (flujo Producto->Receta->RecetaInsumo intacto, sin cambios).
+  insumoElaboradoId String?
   activo     Boolean @default(true)
 
-  producto      Producto       @relation(fields: [productoId], references: [id])
-  recetaInsumos RecetaInsumo[]
+  producto        Producto?      @relation(fields: [productoId], references: [id])
+  insumoElaborado Insumo?        @relation("RecetaDeInsumoElaborado", fields: [insumoElaboradoId], references: [id])
+  recetaInsumos   RecetaInsumo[]
 
   @@index([productoId])
+  @@index([insumoElaboradoId])
   @@map("recetas")
 }
 

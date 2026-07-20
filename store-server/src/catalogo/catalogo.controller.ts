@@ -14,6 +14,7 @@ import {
   CrearRecetaDto,
   CrearRecetaInsumoDto,
   CrearRecetaModificadorDto,
+  DefinirRecetaInsumoElaboradoDto,
   MarcarUsuarioDto,
 } from "./dto/catalogo.dto";
 
@@ -110,5 +111,16 @@ export class CatalogoController {
   @RequierePermiso(PERMISOS.CATALOGO_GESTIONAR)
   agregarRecetaInsumo(@Param("id") id: string, @Body() dto: CrearRecetaInsumoDto) {
     return this.catalogo.agregarRecetaInsumo(id, dto);
+  }
+
+  /**
+   * S-14 (BOM multinivel — productos elaborados/intermedios). Define/
+   * reemplaza la receta COMPLETA de un insumo elaborado (ej. Salsa BBQ) en
+   * una sola llamada; ver CatalogoService.definirRecetaInsumoElaborado.
+   */
+  @Post("insumos/:id/receta")
+  @RequierePermiso(PERMISOS.CATALOGO_GESTIONAR)
+  definirRecetaInsumoElaborado(@Param("id") id: string, @Body() dto: DefinirRecetaInsumoElaboradoDto) {
+    return this.catalogo.definirRecetaInsumoElaborado(id, dto);
   }
 }

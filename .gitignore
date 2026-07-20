@@ -32,3 +32,9 @@ yarn-error.log*
 
 .vercel
 .env*
+
+# material fuente (grabaciones/transcripciones de reuniones) — nunca al repo,
+# demasiado grande y no es un artefacto de proyecto; el analisis extraido SI
+# se versiona en docs/analisis-*.md
+*.mp4
+POS.docx

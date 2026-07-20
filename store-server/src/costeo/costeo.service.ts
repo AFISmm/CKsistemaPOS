@@ -2,7 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { Decimal } from "@prisma/client/runtime/library";
 import { PrismaService } from "../common/prisma/prisma.service";
 import { ErrorDominio } from "../common/errores/error-dominio";
-import { calcularCostoLinea } from "./costeo.types";
+import { calcularCostoLinea, resolverCostoUnitarioInsumo } from "./costeo.types";
 import type { ComboComponenteSeleccionado, InsumoCantidad, ModificadorResuelto } from "./costeo.types";
 
 /**
@@ -59,8 +59,16 @@ export class CosteoService {
     modificadores.forEach((m) => m.deltas.forEach((d) => idsInsumo.add(d.insumoId)));
     (comboSeleccion ?? []).forEach((c) => c.insumos.forEach((ri) => idsInsumo.add(ri.insumoId)));
 
-    const insumos = await this.prisma.insumo.findMany({ where: { id: { in: Array.from(idsInsumo) } } });
-    const costosUnitarios = new Map(insumos.map((i) => [i.id, new Decimal(i.costoUnitario)]));
+    // S-14 (BOM multinivel): resuelve costo unitario de CADA insumo referenciado
+    // por la linea, recursivamente si ese insumo es "elaborado" (ej. una salsa
+    // preparada en tienda que a su vez tiene su propia Receta de insumos base).
+    // Ver resolverCostoUnitarioInsumo (costeo.types.ts) para la precedencia
+    // exacta (receta vigente > costoUnitario cacheado/manual).
+    const { costosBase, recetasElaboradas } = await this.construirGrafoCostoInsumos(Array.from(idsInsumo));
+    const costosUnitarios = new Map<string, Decimal>();
+    for (const insumoId of idsInsumo) {
+      costosUnitarios.set(insumoId, resolverCostoUnitarioInsumo(insumoId, costosBase, recetasElaboradas));
+    }
 
     const costeo = calcularCostoLinea({
       productoId: linea.productoId,
@@ -122,5 +130,53 @@ export class CosteoService {
     if (!receta) return []; // producto sin receta definida: contribuye 0 al costo (igual criterio que InventarioService)
     const items = await this.prisma.recetaInsumo.findMany({ where: { recetaId: receta.id } });
     return items.map((ri) => ({ insumoId: ri.insumoId, cantidad: new Decimal(ri.cantidad) }));
+  }
+
+  /**
+   * S-14 (BOM multinivel): carga, en BFS a partir de los insumos que una
+   * linea vendida referencia directamente, TODO el grafo de costo que hace
+   * falta para resolverlos: el `costoUnitario` cacheado/manual de CADA
+   * insumo tocado (fallback, ver resolverCostoUnitarioInsumo) y, para cada
+   * insumo con `esElaborado=true` que tenga una Receta activa con al menos
+   * un RecetaInsumo, sus ingredientes base (que a su vez pueden ser OTROS
+   * insumos elaborados — de ahi el BFS en vez de resolver un solo nivel).
+   * Puramente de LECTURA: no hay limite artificial de profundidad porque
+   * `resolverCostoUnitarioInsumo` ya se protege de ciclos con `visitados`
+   * (y el camino de escritura, CatalogoService.definirRecetaInsumoElaborado,
+   * ya los rechaza con detectarCicloReceta antes de persistir nada).
+   */
+  private async construirGrafoCostoInsumos(
+    idsIniciales: string[],
+  ): Promise<{ costosBase: Map<string, Decimal>; recetasElaboradas: Map<string, InsumoCantidad[]> }> {
+    const costosBase = new Map<string, Decimal>();
+    const recetasElaboradas = new Map<string, InsumoCantidad[]>();
+    const porResolver = [...idsIniciales];
+    const yaCargado = new Set<string>();
+
+    while (porResolver.length > 0) {
+      const insumoId = porResolver.shift() as string;
+      if (yaCargado.has(insumoId)) continue;
+      yaCargado.add(insumoId);
+
+      const insumo = await this.prisma.insumo.findUnique({ where: { id: insumoId } });
+      if (!insumo) continue; // insumo inexistente: costa 0 (mismo criterio de calcularCostoLinea)
+      costosBase.set(insumoId, new Decimal(insumo.costoUnitario));
+
+      if (!insumo.esElaborado) continue;
+
+      const receta = await this.prisma.receta.findFirst({ where: { insumoElaboradoId: insumoId, activo: true } });
+      if (!receta) continue; // elaborado pero sin receta definida todavia: fallback a costoUnitario
+
+      const items = await this.prisma.recetaInsumo.findMany({ where: { recetaId: receta.id } });
+      if (items.length === 0) continue;
+
+      const itemsResueltos = items.map((ri) => ({ insumoId: ri.insumoId, cantidad: new Decimal(ri.cantidad) }));
+      recetasElaboradas.set(insumoId, itemsResueltos);
+      for (const item of itemsResueltos) {
+        if (!yaCargado.has(item.insumoId)) porResolver.push(item.insumoId);
+      }
+    }
+
+    return { costosBase, recetasElaboradas };
   }
 }

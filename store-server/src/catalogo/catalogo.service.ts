@@ -4,6 +4,7 @@ import { EventosService } from "../common/eventos/eventos.service";
 import { EVENTOS_DOMINIO } from "../common/eventos/tipos-evento";
 import { ErrorDominio } from "../common/errores/error-dominio";
 import { uuidv7 } from "../common/util/uuid";
+import { detectarCicloReceta } from "./receta-ciclo";
 import type {
   ActualizarInsumoDto,
   ActualizarProductoDto,
@@ -16,6 +17,7 @@ import type {
   CrearRecetaDto,
   CrearRecetaInsumoDto,
   CrearRecetaModificadorDto,
+  DefinirRecetaInsumoElaboradoDto,
 } from "./dto/catalogo.dto";
 
 /**
@@ -200,17 +202,24 @@ export class CatalogoService {
         unidadMedida: dto.unidadMedida,
         umbralStockBajo: dto.umbralStockBajo,
         costoUnitario: dto.costoUnitario ?? 0,
+        esElaborado: dto.esElaborado ?? false,
       },
     });
   }
 
-  /** PATCH /api/v1/insumos/:id — actualiza el costo unitario vigente (F2-T1). */
+  /** PATCH /api/v1/insumos/:id — actualiza costo unitario y/o esElaborado (F2-T1 + S-14). */
   async actualizarInsumo(id: string, dto: ActualizarInsumoDto) {
     const insumo = await this.prisma.insumo.findUnique({ where: { id } });
     if (!insumo) {
       throw new ErrorDominio("insumo_no_encontrado", `Insumo ${id} no existe`, 404);
     }
-    return this.prisma.insumo.update({ where: { id }, data: { costoUnitario: dto.costoUnitario } });
+    return this.prisma.insumo.update({
+      where: { id },
+      data: {
+        ...(dto.costoUnitario !== undefined ? { costoUnitario: dto.costoUnitario } : {}),
+        ...(dto.esElaborado !== undefined ? { esElaborado: dto.esElaborado } : {}),
+      },
+    });
   }
 
   async crearReceta(dto: CrearRecetaDto) {
@@ -263,5 +272,91 @@ export class CatalogoService {
         cantidadDelta: dto.cantidadDelta,
       },
     });
+  }
+
+  /**
+   * POST /api/v1/insumos/:id/receta — S-14 (BOM multinivel, ver
+   * docs/analisis-reunion-diego-arches-20260717.md §3.1 y docs/requisitos.md
+   * S-14). Define/REEMPLAZA la receta completa de un Insumo elaborado (ej.
+   * Salsa BBQ): valida que ninguno de los insumos base referenciados forme un
+   * ciclo (directo o transitivo) con este insumo ANTES de escribir nada
+   * (`detectarCicloReceta`, 422 si lo detecta), luego, en una sola
+   * transaccion, desactiva cualquier Receta anterior de este insumo elaborado
+   * y crea la nueva Receta + sus RecetaInsumo (MISMAS tablas que ya usa el
+   * flujo Producto->Receta->RecetaInsumo, sin estructura paralela) y marca
+   * `Insumo.esElaborado = true`.
+   */
+  async definirRecetaInsumoElaborado(insumoElaboradoId: string, dto: DefinirRecetaInsumoElaboradoDto) {
+    const insumo = await this.prisma.insumo.findUnique({ where: { id: insumoElaboradoId } });
+    if (!insumo) {
+      throw new ErrorDominio("insumo_no_encontrado", `Insumo ${insumoElaboradoId} no existe`, 404);
+    }
+
+    const idsBase = dto.items.map((item) => item.insumoBaseId);
+    const insumosBase = await this.prisma.insumo.findMany({ where: { id: { in: idsBase } } });
+    if (insumosBase.length !== new Set(idsBase).size) {
+      const encontrados = new Set(insumosBase.map((i) => i.id));
+      const faltantes = idsBase.filter((id) => !encontrados.has(id));
+      throw new ErrorDominio(
+        "insumo_no_encontrado",
+        `Insumo(s) base no existen: ${Array.from(new Set(faltantes)).join(", ")}`,
+        422,
+      );
+    }
+
+    const grafoRecetasVigentes = await this.construirGrafoRecetasElaboradas();
+    if (detectarCicloReceta(insumoElaboradoId, idsBase, grafoRecetasVigentes)) {
+      throw new ErrorDominio(
+        "receta_elaborado_ciclo",
+        `La receta propuesta para el insumo elaborado ${insumoElaboradoId} formaria un ciclo (directo o transitivo)`,
+        422,
+      );
+    }
+
+    const receta = await this.prisma.$transaction(async (tx) => {
+      // Desactiva cualquier receta previa de este insumo elaborado: evita la
+      // ambiguedad de "cual es la activa" que tendria mantener varias filas
+      // activo=true simultaneas para el mismo insumoElaboradoId.
+      await tx.receta.updateMany({ where: { insumoElaboradoId, activo: true }, data: { activo: false } });
+
+      const nuevaReceta = await tx.receta.create({
+        data: { id: uuidv7(), insumoElaboradoId, activo: true },
+      });
+      for (const item of dto.items) {
+        await tx.recetaInsumo.create({
+          data: { id: uuidv7(), recetaId: nuevaReceta.id, insumoId: item.insumoBaseId, cantidad: item.cantidad },
+        });
+      }
+      await tx.insumo.update({ where: { id: insumoElaboradoId }, data: { esElaborado: true } });
+      return nuevaReceta;
+    });
+
+    return this.prisma.receta.findUnique({
+      where: { id: receta.id },
+      include: { recetaInsumos: true },
+    });
+  }
+
+  /**
+   * Grafo de recetas VIGENTES (activo=true) de TODOS los insumos elaborados
+   * hoy en el catalogo: insumoId elaborado -> ids de sus insumos base. Lo
+   * consume `detectarCicloReceta` (junto con la receta PROPUESTA para el
+   * insumo que se esta definiendo/actualizando) para rechazar ciclos ANTES
+   * de escribir nada.
+   */
+  private async construirGrafoRecetasElaboradas(): Promise<Map<string, string[]>> {
+    const recetas = await this.prisma.receta.findMany({
+      where: { activo: true, insumoElaboradoId: { not: null } },
+      include: { recetaInsumos: true },
+    });
+    const grafo = new Map<string, string[]>();
+    for (const receta of recetas) {
+      if (!receta.insumoElaboradoId) continue;
+      grafo.set(
+        receta.insumoElaboradoId,
+        receta.recetaInsumos.map((ri) => ri.insumoId),
+      );
+    }
+    return grafo;
   }
 }

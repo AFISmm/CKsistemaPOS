@@ -160,13 +160,70 @@ export class CrearInsumoDto {
   @IsNumber()
   @Min(0)
   costoUnitario?: number;
+
+  /**
+   * S-14 (BOM multinivel — productos elaborados/intermedios): true si este
+   * insumo se PRODUCE en tienda a partir de otros insumos base (ej. Salsa
+   * BBQ) en vez de comprarse ya listo. Opcional, default false (identico al
+   * comportamiento existente). Puede declararse aqui ANTES de definir la
+   * receta via POST /api/v1/insumos/:id/receta (que de todos modos lo marca
+   * en true automaticamente al definir/actualizar la receta).
+   */
+  @IsOptional()
+  @IsBoolean()
+  esElaborado?: boolean;
 }
 
-/** PATCH /api/v1/insumos/:id — hoy solo permite actualizar el costo (F2-T1); ampliable. */
+/**
+ * PATCH /api/v1/insumos/:id — actualiza costo y/o el flag esElaborado (F2-T1
+ * + S-14). Ambos campos opcionales (antes `costoUnitario` era requerido; se
+ * relaja de forma ADITIVA para permitir actualizar solo `esElaborado` sin
+ * tener que reenviar el costo vigente en el mismo PATCH — ningun llamador
+ * existente se rompe porque seguir enviando `costoUnitario` sigue siendo
+ * valido).
+ */
 export class ActualizarInsumoDto {
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  costoUnitario!: number;
+  costoUnitario?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  esElaborado?: boolean;
+}
+
+/**
+ * S-14: UN ingrediente base (por unidad producida) dentro de la receta que se
+ * esta definiendo/reemplazando para un Insumo elaborado.
+ */
+export class ItemRecetaInsumoElaboradoDto {
+  @IsString()
+  insumoBaseId!: string;
+
+  @IsNumber()
+  @Min(0)
+  cantidad!: number;
+}
+
+/**
+ * POST /api/v1/insumos/:id/receta — S-14 (BOM multinivel). A diferencia del
+ * flujo Producto (POST /recetas + POST /recetas/:id/insumos, dos llamadas
+ * incrementales), este endpoint define la receta COMPLETA de un insumo
+ * elaborado en una sola llamada: mas seguro para este caso porque
+ * CatalogoService.definirRecetaInsumoElaborado valida ausencia de ciclos
+ * (detectarCicloReceta) contra la lista COMPLETA propuesta antes de escribir
+ * nada, y reemplaza (desactiva) cualquier receta anterior del mismo insumo
+ * elaborado en la misma transaccion — evitar el estado intermedio "receta a
+ * medio construir" que si seria valido, aunque incompleto, en el flujo
+ * incremental de Producto.
+ */
+export class DefinirRecetaInsumoElaboradoDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ValidateNested({ each: true })
+  @Type(() => ItemRecetaInsumoElaboradoDto)
+  items!: ItemRecetaInsumoElaboradoDto[];
 }
 
 /**

@@ -129,6 +129,20 @@ Leyenda de estado: `PENDIENTE` · `EN CURSO` · `LISTO` · `BLOQUEADO` · `POSTE
 > `git status` confirma que solo se tocaron los archivos de `store-server`
 > directamente relacionados con cada hallazgo.
 
+## Análisis de dominio — reunión con Diego Cataño (2026-07-17)
+> Ver `docs/analisis-reunion-diego-arches-20260717.md` (análisis completo de una
+> reunión de 2h con un ex-arquitecto de POS de Alsea/Archis, ~28 tiendas en
+> producción sobre software "Codesis"). Fuente: `POS.docx` (transcripción del
+> usuario), no se conserva en el repo.
+| Ítem | Estado | Detalle |
+|------|--------|---------|
+| Validación de decisiones ya tomadas (costeo de combos, bajas con aprobación, monitoreo de conectividad, sin mandato de facturación electrónica en EE.UU.) | CONFIRMADO | Sin cambios de código — el diseño actual ya cubre estos puntos, ver §2 del análisis |
+| S-14 — BOM multinivel (insumos elaborados/intermedios, ej. salsas preparadas en tienda) | LISTO | `Insumo.esElaborado` + reuso de `Receta`/`RecetaInsumo` (`Receta.insumoElaboradoId`), `InventarioService.producirInsumoElaborado` (consume base, produce elaborado, atómico por pre-validación), `CosteoService` resuelve costo recursivo con detección de ciclos (`detectarCicloReceta`). Verificado por el orquestador: build limpio, 21 suites/170 unit tests (incluye 2 suites nuevas); integración escrita y compilando, sin ejecutar (gap de entorno de siempre) |
+| S-15 — Motor de promociones condicionales/cupones | DOCUMENTADO, NO IMPLEMENTADO (deliberado) | Alcance mayor, diferido a cuando el proyecto llegue a Gold Wing Club/lealtad; lección de control de fraude ya incorporada al supuesto (ver requisitos.md S-15) |
+| Trazabilidad por lote/código de barras para bajas | PREGUNTA ABIERTA NUEVA | Requiere decisión de negocio (hardware de escaneo, umbral por insumo vs. agregado) antes de poder implementarse — ver requisitos.md pregunta 7 |
+| Mejoras de KDS (split-screen, expeditar, recuperar ticket, cola por SLA de canal) | BACKLOG FUTURO | Pertenece a `kds-cocina-pos`, no a `store-server`; el KDS de producción aún no se ha construido |
+| Matriz de ~120 requerimientos funcionales que Diego ofreció compartir | ACCIÓN DE SEGUIMIENTO (no técnica) | Pendiente que Felipe la solicite |
+
 ## Fase 1.5 — Andamiaje DEMO (orquestador)
 | Tarea | Dueño | Entregable | Estado |
 |-------|-------|------------|--------|

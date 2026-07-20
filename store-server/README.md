@@ -1462,3 +1462,320 @@ el gate de Fase 3.
   de que la nube corporativa este arriba; si operaciones prefiere agregar un
   host propio a la lista (ademas de, no en vez de, los genericos) es un
   cambio de configuracion, no de codigo.
+
+## 19. S-14 — BOM multinivel: productos elaborados/intermedios (`menu-inventario-pos`)
+
+**Origen:** reunion con Diego Cataño sobre la arquitectura de Archis/Alsea
+(2026-07-17) — ver `docs/analisis-reunion-diego-arches-20260717.md` §3.1 y
+`docs/requisitos.md` S-14. Diego describio un patron que Chicken Kitchen
+"casi seguro necesita tambien" dado que el menu demo ya tiene "13 Signature
+Sauces": una salsa/aderezo se PREPARA en tienda a partir de insumos base (ej.
+tomate, especias) y esa preparacion en si misma se vuelve un "insumo" que
+otros platos usan en SUS recetas. Hasta esta tarea, `Receta`/`RecetaInsumo`
+(F2-T1) solo modelaba UN nivel: `Producto -> Insumo` directo. No habia forma
+de decir "la receta del Chop-Chop Bowl usa 2oz de Salsa BBQ, y la Salsa BBQ EN
+SI MISMA tiene su propia receta de insumos base" — sin eso, `CosteoService` no
+podia costear el insumo preparado (solo sabia costear insumos comprados
+directamente) y no existia un movimiento de inventario que produjera stock de
+la salsa a partir de sus insumos base (la venta de un plato con salsa
+preparada habria descontado el insumo equivocado, o ninguno).
+
+### 19.1 Modelo de datos (aditivo, `prisma/schema.prisma`)
+
+- `Insumo.esElaborado Boolean @default(false)` (campo nuevo): marca que este
+  insumo se PRODUCE en tienda (ej. Salsa BBQ) en vez de comprarse ya listo.
+  Default `false` no cambia el comportamiento de ninguna fila existente. Es
+  un atajo de lectura para catalogo/UI — la fuente de verdad real de "tiene
+  receta definida" sigue siendo la existencia de una `Receta` con
+  `insumoElaboradoId` apuntando a este insumo y `activo=true`.
+- `Receta.productoId` pasa de requerido a **opcional** (`String?`), y se
+  agrega `Receta.insumoElaboradoId String?` (FK opcional hacia `Insumo`,
+  relacion nombrada `"RecetaDeInsumoElaborado"` porque `Receta` ahora tiene
+  DOS FKs opcionales hacia entidades distintas). **Se reusa la MISMA tabla**
+  para "receta de un Producto de menu" y "receta de un Insumo elaborado" —
+  deliberadamente, para no duplicar la estructura de `RecetaInsumo` (que ya
+  modela exactamente "N unidades de este insumo por unidad de lo que sea que
+  esta Receta describe", sin que le importe si el "dueño" de la receta es un
+  Producto o un Insumo). Invariante de aplicacion (NO hay `CHECK` constraint
+  de Postgres — este repo no genera migraciones sin Postgres real, ver §9.2):
+  EXACTAMENTE uno de `productoId`/`insumoElaboradoId` esta definido por fila,
+  nunca ambos ni ninguno; la garantiza `CatalogoService` (`crearReceta` sigue
+  exigiendo `productoId` tal cual antes; `definirRecetaInsumoElaborado`
+  exige `insumoElaboradoId` y jamas toca `productoId`). El flujo existente
+  `Producto -> Receta -> RecetaInsumo` (F2-T1) queda **exactamente igual**:
+  ninguna fila preexistente cambia de forma (`insumoElaboradoId` es `null`
+  para todas).
+- `TipoEventoAuditoria` gana un valor nuevo (aditivo): `produccionInsumoElaborado`
+  (ver 19.3).
+- Igual que TODAS las tareas anteriores de este repo (ver §12/§17.1/§18.4/
+  §18.9), **no se genero migracion de Prisma** (no hay Postgres real en este
+  sandbox). `npm run prisma:migrate:dev` contra Postgres real la generara en
+  un solo paso, incluyendo estos cambios. `npx prisma generate` SI se corrio
+  (no requiere Postgres, solo lee el schema) para regenerar el cliente
+  tipado y verificar que `npm run build`/`npm run lint` compilan contra los
+  campos/relaciones nuevos.
+
+### 19.2 Endpoints nuevos
+
+| Metodo/ruta | Permiso | Notas |
+|---|---|---|
+| `POST /api/v1/insumos/:id/receta` (`CatalogoController`) | `catalogo.gestionar` (reusado, NINGUN permiso nuevo) | Define/REEMPLAZA la receta COMPLETA de un insumo elaborado en una sola llamada (`{ items: [{ insumoBaseId, cantidad }] }`). |
+| `POST /api/v1/stock/produccion` (`InventarioController`) | `inventario.ajustar` (reusado, NINGUN permiso nuevo) | Produce `cantidadProducida` unidades de un insumo elaborado, consumiendo sus insumos base (ver 19.3). |
+
+**Por que se reusan permisos existentes en vez de crear nuevos** (el
+enunciado de la tarea lo dejaba abierto): `rol-gerente`
+(`prisma/seed.ts#PERMISOS_GERENCIALES`) YA tiene tanto `catalogo.gestionar`
+como `inventario.ajustar` — definir la receta de una salsa es, en espiritu,
+exactamente el mismo tipo de accion gerencial que dar de alta un `Insumo` o
+un `RecetaInsumo` de un Producto (ambos ya detras de `catalogo.gestionar`); y
+producir un insumo elaborado es, en espiritu, el mismo tipo de "mover stock
+manualmente" que ya cubre `inventario.ajustar` (`POST /stock/ajuste`).
+Agregar dos permisos granulares nuevos solo para replicar ese mismo reparto
+habria sido ceremonia sin beneficio — si operaciones decide mas adelante que
+"definir una receta de salsa" o "producir en tienda" ameritan un permiso
+MAS ESTRICTO que el resto de `catalogo.gestionar`/`inventario.ajustar`
+(ej. separarlo de "ajustar stock por error de conteo"), es un cambio
+localizado de una linea en el `@RequierePermiso` de cada endpoint, no una
+reestructuracion.
+
+### 19.3 `InventarioService.producirInsumoElaborado` — como produce sin dejar consumo parcial
+
+Analogo a `registrarMermaAprobada` (F3-T1) pero para produccion interna en vez
+de merma: en vez de solo restar, CONSUME insumos base y GENERA stock del
+insumo elaborado. Reusa el **unico punto de escritura sobre Stock**
+(`aplicarMovimiento`, arq. 4.5) para CADA movimiento — no se escribio una
+segunda forma de mutar `Stock.cantidadActual`; solo se agrego el valor
+`"produccion"` al union type de `tipoMovimiento` que `aplicarMovimiento` ya
+aceptaba.
+
+Orden de la operacion:
+
+1. Resuelve la `Receta` VIGENTE (`activo=true`) del insumo elaborado por
+   `insumoElaboradoId`; 422 si el insumo no existe, no esta marcado
+   `esElaborado`, no tiene receta activa, o la receta no tiene insumos base.
+2. Calcula el consumo de CADA insumo base = `RecetaInsumo.cantidad *
+   cantidadProducida` (mismo patron de escalado que
+   `moverStockPorPedido` ya usa para escalar por `LineaDePedido.cantidad`).
+3. **Lee el stock ACTUAL de TODOS los insumos base de una sola vez** (un
+   `findMany`) y valida que CADA UNO alcance para su consumo calculado. Si
+   CUALQUIERA no alcanza, rechaza la operacion COMPLETA con 422
+   `stock_insuficiente` (incluye el detalle de cuales insumos faltaron y
+   cuanto) **ANTES de llamar a `aplicarMovimiento` ni una sola vez** — este
+   es el requisito nucleo de la tarea ("si algun insumo base no alcanza, se
+   rechaza la operacion completa ANTES de mutar nada"), verificado
+   explicitamente en `test/integration/insumo-elaborado.integration.spec.ts`
+   caso (c): un insumo que SI alcanzaba (tomate) NO se consume solo porque
+   otro (especias) no alcanzaba.
+4. Solo si TODOS los insumos base alcanzan: aplica un `aplicarMovimiento`
+   (delta negativo) por cada insumo base consumido, y un `aplicarMovimiento`
+   final (delta positivo `cantidadProducida`) para el insumo elaborado. Cada
+   uno de estos YA escribe su propio `EventoDeAuditoria` tipo
+   `ajusteInventario` (igual que cualquier otro movimiento de stock).
+5. Escribe UN `EventoDeAuditoria` adicional tipo `produccionInsumoElaborado`
+   con el resumen completo (receta usada, cantidad producida, y el detalle de
+   CADA insumo base consumido) — mismo patron que `alertaMerma` (F3-T1) es
+   una segunda auditoria por ENCIMA de la que ya escribe `aplicarMovimiento`.
+
+**Nota honesta sobre atomicidad multi-fila:** los pasos 4 se aplican
+SECUENCIALMENTE (un `aplicarMovimiento` por insumo, cada uno atomico a nivel
+de fila via `{ increment: delta }`), sin envolver el LOTE completo en una
+`prisma.$transaction`. Esto es **exactamente el mismo patron** que
+`InventarioService.moverStockPorPedido` ya usa para descontar los N insumos
+de la receta de UN producto vendido (tampoco envuelto en una transaccion) —
+no se inventa un patron nuevo mas estricto solo para esta tarea. El riesgo
+real que esto deja abierto (un crash de proceso a mitad del loop del paso 4)
+es un riesgo PREEXISTENTE compartido con `moverStockPorPedido`, no uno
+introducido por S-14; lo que SI es especifico y verificado de esta tarea es
+que la VALIDACION (paso 3) es atomica respecto de la decision "se puede
+producir o no", que es lo que el enunciado pedia explicitamente ("rechazar
+ANTES de mutar", no "envolver todo en una transaccion de DB"). Si operaciones
+decide que ese riesgo residual (crash a mitad de un loop de mutaciones ya
+validadas) es inaceptable, la solucion correcta es envolver TODO
+`InventarioService` (incluido `moverStockPorPedido`, no solo esto) en
+transacciones — un cambio transversal fuera del alcance puntual de S-14.
+
+### 19.4 `CatalogoService.definirRecetaInsumoElaborado` — como se rechaza un ciclo ANTES de escribir
+
+`POST /api/v1/insumos/:id/receta` define la receta COMPLETA de un insumo
+elaborado en una sola llamada (a diferencia del flujo Producto, que son DOS
+llamadas incrementales: `POST /recetas` + `POST /recetas/:id/insumos` por
+cada insumo). Se eligio "todo de una vez" para este caso especifico porque
+permite validar la receta PROPUESTA COMPLETA contra ciclos antes de
+persistir cualquier fila — con el flujo incremental de Producto no hay ese
+mismo riesgo (un Producto nunca puede aparecer como ingrediente de su propia
+receta, solo los insumos elaborados pueden formar un grafo con ciclos).
+
+1. Valida que el insumo elaborado y TODOS los insumos base propuestos
+   existan (422 si falta alguno).
+2. Construye el grafo de recetas VIGENTES de TODOS los demas insumos
+   elaborados del catalogo (`insumoId -> [ids de sus insumos base]`) y llama
+   a `detectarCicloReceta(insumoElaboradoId, idsBase, grafo)`
+   (`src/catalogo/receta-ciclo.ts`, funcion PURA, DFS clasico de deteccion de
+   ciclos marcando "nodos en la pila de recursion actual"). Si detecta un
+   ciclo (directo: el insumo se referencia a si mismo; o transitivo: A usa B
+   y B ya usa A, en cualquier profundidad), rechaza con 422
+   `receta_elaborado_ciclo` **sin tocar la base de datos**.
+3. Si no hay ciclo, en una sola `prisma.$transaction`: desactiva
+   (`activo=false`) cualquier `Receta` anterior de este insumo elaborado (para
+   no dejar dos filas `activo=true` simultaneas para el mismo
+   `insumoElaboradoId`), crea la `Receta` nueva + sus `RecetaInsumo` (MISMAS
+   tablas que el flujo Producto, sin estructura paralela), y marca
+   `Insumo.esElaborado = true`.
+
+`test/unit/receta-ciclo.spec.ts` cubre `detectarCicloReceta` en aislamiento
+(sin DB): auto-referencia directa, ciclo transitivo de 2 y 3 niveles, una
+receta normal sin ciclo, dos insumos elaborados independientes que comparten
+un ingrediente base (NO es un ciclo), receta vacia, y redefinir la receta
+VIGENTE de un insumo usando la version PROPUESTA (no la vieja) para decidir.
+`test/integration/insumo-elaborado.integration.spec.ts` caso (e) verifica
+que un intento de ciclo real (la Salsa BBQ referenciandose a si misma) se
+rechaza y NO sobreescribe la receta original.
+
+### 19.5 `CosteoService` — costeo RECURSIVO de un insumo elaborado (y su precedencia sobre `costoUnitario`)
+
+Antes de esta tarea, `CosteoService.calcularCostoLineaPersistida` resolvia el
+costo de cada insumo referenciado por una linea vendida leyendo directamente
+`Insumo.costoUnitario`. Si esa linea usaba una salsa preparada (ej. 2oz de
+Salsa BBQ), el costo de esa salsa era lo que fuera que alguien hubiera tecleado
+manualmente en `costoUnitario` — nunca el costo REAL derivado de sus
+ingredientes base, y sin forma de que ese numero se actualizara solo si
+subia el precio del tomate.
+
+**Que se agrego (sin tocar `calcularCostoLinea`, la funcion pura existente
+de F2-T1 — el desglose por insumo de UNA linea sigue exactamente igual):**
+
+- `resolverCostoUnitarioInsumo` (`src/costeo/costeo.types.ts`, funcion PURA,
+  sin Prisma — ver `test/unit/costeo-elaborado.spec.ts`): dado un
+  `insumoId`, un mapa de costos base conocidos (`Insumo.costoUnitario`
+  cacheado de CUALQUIER insumo) y un mapa de recetas de insumos elaborados
+  YA resueltas (`insumoId -> [{insumoId, cantidad}]`), calcula el costo
+  recursivamente: `costo = Σ (cantidad_i * costo(insumo_base_i))`. Usa un set
+  `visitados` (pasado por la pila de recursion) como guarda de ciclos, MISMO
+  principio de "nodo en la pila actual" que `detectarCicloReceta`
+  (§19.4) — defensa en profundidad en el camino de LECTURA, dado que el
+  camino de ESCRITURA ya deberia haber rechazado cualquier ciclo antes de
+  persistirlo.
+- **Precedencia documentada (la que pedia explicitamente el enunciado de la
+  tarea):** si el insumo tiene una receta VIGENTE resuelta (esta en el mapa
+  `recetasElaboradas`), el costo recursivo por receta **GANA** sobre
+  `costoUnitario`. `costoUnitario` es SOLO el fallback: se usa cuando el
+  insumo no es elaborado, cuando es elaborado pero todavia no tiene una
+  receta definida, o cuando se detecta un ciclo (caso que en teoria nunca
+  deberia ocurrir por el guard de escritura). Razon: `costoUnitario` de un
+  insumo elaborado es, en el mejor de los casos, un valor cacheado que
+  alguien tecleo a mano en algun momento — la receta vigente es la fuente de
+  verdad de cuanto CUESTA REALMENTE producirlo HOY, con los precios vigentes
+  de sus insumos base.
+- `CosteoService.construirGrafoCostoInsumos` (metodo privado nuevo, SI toca
+  Prisma): dado el conjunto de insumos que una linea vendida referencia
+  directamente, hace BFS cargando el `costoUnitario` de cada insumo tocado y,
+  para cada uno con `esElaborado=true` y una `Receta` activa no vacia, sus
+  ingredientes base (que a su vez pueden ser OTROS insumos elaborados — BOM
+  de mas de un nivel, ej. una "salsa especial" que usa mayonesa preparada
+  como base). `calcularCostoLineaPersistida` llama a este metodo y luego a
+  `resolverCostoUnitarioInsumo` por cada insumo de la linea, en vez de leer
+  `Insumo.costoUnitario` directo como antes.
+
+**Dato clave que confirma que el diseño de datos es el correcto:**
+`InventarioService.moverStockPorPedido` (el listener de `VentaConfirmada`
+que descuenta stock al vender, F1-T2) **no necesito ningun cambio de
+codigo** para este caso. Ya era suficientemente generico: itera
+`RecetaInsumo` de la receta del Producto y llama `aplicarMovimiento` por
+CADA `insumoId` referenciado, sin que le importe si ese insumo es
+`esElaborado` o no. Si la receta del Chop-Chop Bowl tiene una fila
+`RecetaInsumo` con `insumoId = Salsa BBQ`, vender el plato YA decrementa el
+stock de la Salsa BBQ (no el de sus insumos base crudos) — exactamente el
+comportamiento que S-14 pedia ("el descuento de inventario al vender un
+plato con salsa preparada... deberia decrementar el stock PROPIO de la
+salsa preparada, no ninguno, ni el de los insumos base directamente"). Solo
+`CosteoService` (que SI necesitaba resolver un numero — el costo — que antes
+no sabia calcular) requeria cambios. Verificado end-to-end en
+`test/integration/insumo-elaborado.integration.spec.ts` caso (d).
+
+### 19.6 Tests
+
+- `test/unit/receta-ciclo.spec.ts`: `detectarCicloReceta` PURA — auto-
+  referencia directa, ciclo transitivo de 2 y 3 niveles, receta normal sin
+  ciclo, dos insumos elaborados independientes que comparten un ingrediente
+  base (no es un ciclo), receta vacia, y redefinicion de una receta vigente
+  usando la version propuesta.
+- `test/unit/costeo-elaborado.spec.ts`: `resolverCostoUnitarioInsumo` PURA —
+  insumo no elaborado usa `costoUnitario` directo; insumo ausente de ambos
+  mapas cuesta 0; **la receta vigente le gana al `costoUnitario` cacheado
+  (stale) del propio insumo elaborado**; **caso base del enunciado**: un
+  plato que usa una salsa preparada cambia de costo total cuando cambia el
+  costo de un ingrediente BASE de la salsa (no del plato directamente);
+  BOM de mas de un nivel (una salsa que usa OTRA preparacion elaborada como
+  base); y un ciclo de datos corrupto (que en teoria el guard de escritura ya
+  deberia haber evitado) no cuelga ni lanza, cae al fallback.
+- `test/integration/insumo-elaborado.integration.spec.ts` (requiere Postgres
+  real, ver §9.2) — envoltorio REAL contra la base: `(a)` `definirRecetaInsumoElaborado`
+  marca `esElaborado=true` y persiste via `Receta`/`RecetaInsumo`; `(b)`
+  `producirInsumoElaborado` decrementa CADA insumo base escalado por
+  `cantidadProducida` e incrementa el stock del insumo elaborado, mas la
+  auditoria `produccionInsumoElaborado`; `(c)` producir MAS de lo que alcanza
+  un insumo base rechaza la operacion COMPLETA (422) y NO consume ningun
+  insumo base parcialmente (ni siquiera el que SI alcanzaba); `(d)` vender un
+  plato que usa la salsa preparada decrementa el stock de LA SALSA (no el de
+  sus insumos base crudos) via el flujo EXISTENTE de `VentaConfirmada`, sin
+  cambios en `moverStockPorPedido`; `(e)` intentar definir una receta que
+  formaria un ciclo se rechaza y no sobreescribe la receta original; `(f)`
+  producir un insumo sin `esElaborado`/receta se rechaza.
+
+**Verificado por el agente que construyo esta tarea:** `npx prisma generate`
+limpio contra el schema con los campos/relaciones nuevos, `npm run build`
+limpio, `npm run lint` (`tsc --noEmit`) limpio, y `npm run test:unit` →
+**21 suites, 170/170 tests** (incluye las 2 suites nuevas de esta tarea mas
+TODAS las existentes de F1/F2/F3/§18, que se desarrollaron en paralelo en
+este mismo sandbox). Igual que TODAS las tareas anteriores de este repo
+(§9.2/§12/§17.5/§18.8): sin Docker/Postgres en este entorno (`docker` ni
+siquiera esta instalado, verificado explicitamente), `npm run test:integration`
+hace `describe.skip` limpio en las **8** suites de integracion existentes
+(**37** tests saltados), incluida la nueva
+`insumo-elaborado.integration.spec.ts` — se escribio y compila, pero NO se
+ejecuto contra Postgres real. Correrla con Postgres real antes de cerrar el
+gate de esta tarea.
+
+### 19.7 Que NO se toco / gaps conocidos
+
+- `src/catalogo/dto/catalogo.dto.ts#ActualizarInsumoDto.costoUnitario` pasa
+  de requerido a opcional (cambio ADITIVO: cualquier llamador que siga
+  enviandolo sigue funcionando identico; ahora tambien se puede hacer un
+  `PATCH` que SOLO cambie `esElaborado` sin tener que reenviar el costo
+  vigente en el mismo body). Ningun test existente llamaba a
+  `actualizarInsumo`/`ActualizarInsumoDto` antes de esta tarea (verificado
+  por busqueda), asi que no hay riesgo de romper un test preexistente.
+- `crearReceta`/`agregarRecetaInsumo`/`CrearRecetaDto` (el flujo de recetas de
+  Producto, F2-T1) **quedan sin ningun cambio** — `definirRecetaInsumoElaborado`
+  es un metodo/endpoint NUEVO y separado, no una extension de esos DTOs/
+  metodos existentes. Se documenta la decision explicitamente (ver 19.4) para
+  que quede claro que no es un descuido: el shape de entrada es distinto a
+  proposito (un solo POST con la receta completa, en vez de dos llamadas
+  incrementales) porque el caso de uso (validar ausencia de ciclos contra la
+  receta COMPLETA propuesta) lo pedia.
+- No se agrego ningun permiso nuevo a `src/seguridad/permisos.ts` ni se tocaron
+  archivos de `src/seguridad/*` (respetando la restriccion de esta tarea) — se
+  reusan `catalogo.gestionar`/`inventario.ajustar` (ver 19.2, con la
+  justificacion completa de por que alcanza).
+- No hay endpoint de LECTURA dedicado para "ver la receta vigente de un
+  insumo elaborado" (ej. `GET /api/v1/insumos/:id/receta`) — hoy se puede
+  reconstruir via `GET /api/v1/catalogo` (que ya devuelve `insumos`,
+  `recetas` y `recetaInsumos` completos, sin cambios necesarios: los campos/
+  relaciones nuevos simplemente fluyen a traves de las mismas queries
+  existentes) o consultando Prisma directamente. Trivial de agregar despues
+  si el catalogo/UI lo necesita como lectura de un solo endpoint.
+- `producirInsumoElaborado` NO valida que `Ubicacion` este activa
+  (`activo=true`) antes de producir — mismo criterio (o mismo descuido,
+  segun se lo mire) que `ajustarManual`/`registrarMermaAprobada`, que tampoco
+  lo validan; no es una regresion introducida por esta tarea.
+- La atomicidad multi-fila de `producirInsumoElaborado` (pasos de consumo
+  secuenciales, no envueltos en una `prisma.$transaction`) es una decision
+  documentada explicitamente en 19.3, no un descuido — sigue el mismo patron
+  preexistente de `moverStockPorPedido`.
+- Pendiente de operaciones (igual que el propio S-14 lo deja abierto en
+  `docs/requisitos.md`): confirmar EXACTAMENTE que salsas/preparaciones de
+  Chicken Kitchen se hacen en tienda (candidatas a `esElaborado=true`) vs. se
+  compran ya preparadas (quedan como insumo simple, sin receta). Nada en esta
+  tarea depende de esa respuesta para funcionar — el modelo soporta ambos
+  casos por insumo individual — pero el catalogo real de "13 Signature
+  Sauces" no se cargo en el seed (`prisma/seed.ts` no se toco).
