@@ -3,19 +3,22 @@
  * componentes/*​/api.ts (pos, empleados, nomina, jornada) al idioma activo.
  *
  * Contexto: cada api.ts de cliente lanza `ErrorApi` con `message` (texto
- * amigable) y, opcionalmente, `codigo`. Dos casos son 100% generados en el
- * CLIENTE (sin red / respuesta sin cuerpo JSON util) y SI se traducen aqui via
- * las claves `api.sinConexion` / `api.errorInesperado`. El resto de los
- * `codigo` (ej. "pedido_no_encontrado", "tarifa_invalida") vienen del backend
- * de dominio (lib/sales, lib/rrhh, lib/nomina) con su `mensaje` ya en
- * espanol: como el backend de esta demo no tiene su propio i18n, ese mensaje
- * se muestra tal cual (limitacion conocida, documentada en el reporte de la
+ * amigable) y, opcionalmente, `codigo`. Varios casos son 100% generados en el
+ * CLIENTE (sin red / respuesta sin cuerpo JSON util / escritura encolada
+ * offline) y SI se traducen aqui via las claves `api.sinConexion` /
+ * `api.errorInesperado` / `api.encoladoSinConexion`. El resto de los `codigo`
+ * (ej. "pedido_no_encontrado", "tarifa_invalida") vienen del backend de
+ * dominio (lib/sales, lib/rrhh, lib/nomina) con su `mensaje` ya en espanol:
+ * como el backend de esta demo no tiene su propio i18n, ese mensaje se
+ * muestra tal cual (limitacion conocida, documentada en el reporte de la
  * tarea de i18n).
  */
 
 /** Codigos sinteticos asignados por los propios clientes api.ts (no vienen del backend). */
 export const CODIGO_SIN_CONEXION = "SIN_CONEXION";
 export const CODIGO_ERROR_INESPERADO_CLIENTE = "ERROR_INESPERADO_CLIENTE";
+/** F1-T3: la escritura fallo por red pero quedo en la cola offline (lib/offline/queue.ts), no se perdio. */
+export const CODIGO_ENCOLADO_SIN_CONEXION = "ENCOLADO_SIN_CONEXION";
 
 interface ErrorApiComoDuckType {
   message?: unknown;
@@ -36,6 +39,7 @@ export function textoErrorApi(err: unknown, t: FuncionTraducir, claveFallback: s
   if (err && typeof err === "object" && "message" in err) {
     const error = err as ErrorApiComoDuckType;
     if (error.codigo === CODIGO_SIN_CONEXION) return t("api.sinConexion");
+    if (error.codigo === CODIGO_ENCOLADO_SIN_CONEXION) return t("api.encoladoSinConexion");
     if (error.codigo === CODIGO_ERROR_INESPERADO_CLIENTE) {
       return t("api.errorInesperado", { status: typeof error.status === "number" ? error.status : "" });
     }

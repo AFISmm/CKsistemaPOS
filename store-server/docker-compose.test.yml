@@ -1,0 +1,28 @@
+# PostgreSQL efimero para los tests de integracion (ver ADR-0007, punto 5).
+# Uso:
+#   docker compose -f docker-compose.test.yml up -d
+#   DATABASE_URL="postgresql://ckpos:ckpos@localhost:5433/ckpos_store_test?schema=public" \
+#     npx prisma migrate deploy
+#   npm run test:integration
+#   docker compose -f docker-compose.test.yml down -v
+#
+# No se asume Docker disponible en todos los entornos de desarrollo (ver
+# README.md, seccion "Tests"): los tests unitarios de reglas de negocio puras
+# (calculo de impuesto, guard de permisos) NO dependen de este contenedor.
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    restart: "no"
+    environment:
+      POSTGRES_USER: ckpos
+      POSTGRES_PASSWORD: ckpos
+      POSTGRES_DB: ckpos_store_test
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ckpos -d ckpos_store_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15

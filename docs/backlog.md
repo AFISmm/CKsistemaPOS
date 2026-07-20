@@ -14,10 +14,94 @@ Leyenda de estado: `PENDIENTE` · `EN CURSO` · `LISTO` · `BLOQUEADO` · `POSTE
 |-------|-------|------------|--------|
 | Alcance MVP, historias de usuario y supuestos | analista-requisitos-pos | docs/requisitos.md | LISTO |
 
+## Fase 0 (Producción) — Bloqueantes de PLAN_DE_PRODUCCION.md
+> Ver `PLAN_DE_PRODUCCION.md` (nuevo, raíz del repo) y `docs/adr/0006-cierre-fase0-bloqueantes-produccion.md`.
+| Tarea | Dueño | Entregable | Estado |
+|-------|-------|------------|--------|
+| F0-T1 — Confirmar store-and-forward del PSP real | pagos-pos | docs/requisitos.md (S-05) | **BLOQUEADO** — no hay PSP contratado; recomendación técnica documentada (Datacap NETePay), decisión comercial pendiente del negocio |
+| F0-T2 — Tasas fiscales oficiales FL/TX | arquitecto-pos + finanzas | docs/requisitos.md (S-06/S-08), ADR-0006 | LISTO — Miami-Dade 7% confirmado con fuente FL DOR; TX 8.25% como techo, verificar por ciudad antes de cada apertura |
+| F0-T3 — Selección de hardware/periféricos | hardware-perifericos-pos | docs/requisitos.md (S-02), ADR-0006 | LISTO (recomendación técnica) — compra final pendiente de aprobación de compras |
+| F0-T4 — Dayparts, umbral de descuento, % de merma | analista-requisitos-pos | docs/requisitos.md (S-03/S-04/S-13) | LISTO (supuesto DEMO documentado, pendiente de validar con operaciones antes de Fase 3) |
+
+> **DoD de Fase 0 (producción):** cumplido salvo F0-T1, que por naturaleza depende
+> de un contrato comercial con un PSP todavía no elegido — no es resoluble por
+> investigación ni bloquea el inicio de Fase 1 (el riesgo aplica a Fase 2,
+> F2-T4/F2-T5, cuando se integre el pago real). Avance a Fase 1 autorizado.
+
 ## Fase 1 — Arquitectura
 | Tarea | Dueño | Entregable | Estado |
 |-------|-------|------------|--------|
 | Arquitectura técnica + ADRs iniciales | arquitecto-pos | docs/arquitectura.md, docs/adr/0001-0005.md | LISTO |
+
+## Fase 1 (Producción) — Fundación de producción (PLAN_DE_PRODUCCION.md §Fase 1)
+> Ver `PLAN_DE_PRODUCCION.md` (raíz del repo), `docs/adr/0007-fase1-store-server-nestjs-postgres.md`.
+| Tarea | Dueño | Entregable | Estado |
+|-------|-------|------------|--------|
+| F1-T1 — Store Server (NestJS) API local por dominio | arquitecto-pos + backend-ventas-pos | `store-server/src/{catalogo,inventario,ventas,pagos,seguridad,common}` | LISTO — build (`nest build`) y `npm run test:unit` (12/12) verificados por el orquestador; contrato REST/nombres cotejado contra `docs/arquitectura.md` §5/§6 |
+| F1-T2 — PostgreSQL local + event log append-only | backend-ventas-pos | `store-server/prisma/schema.prisma` (19 entidades + `EventoDominio` outbox-ready), `prisma/seed.ts` | LISTO (esquema/migraciones); **integración contra Postgres real sin verificar** — este entorno de trabajo no tiene Docker/Postgres disponible. Pendiente correr `test/integration/*` con Postgres real antes de cerrar el Gate de Fase 1 |
+| F1-T4 — Bus de eventos WebSocket (reemplaza polling) | kds-cocina-pos + backend-ventas-pos | `store-server/src/common/eventos/*` (Socket.IO, envelope `{id,tipo,ubicacionId,ocurridoEn,version,payload}`) | LISTO (implementado); latencia real ≤2s (RNF-01) no medida en este entorno (requiere backend corriendo + cliente real) |
+| F1-T5 — Agente de sincronización outbox/inbox + UUID v7 + mTLS | devops-despliegue-pos + backend-ventas-pos | `store-server/src/sync/*` (SyncService outbox, InboxService LWW por version, mTLS con fallback dev, mock-cloud de test) | LISTO — build + `npm run test:unit` (27/27, incluye 3 suites nuevas) verificados por el orquestador; integración contra Postgres real sin ejecutar (mismo gap de entorno que F1-T2) |
+| F1-T6 — RBAC real + PIN hash + auditoría inmutable | seguridad-accesos-pos | `store-server/src/seguridad/*` | LISTO — guard RBAC con test unitario (401/403/200), PIN con bcrypt, `EventoDeAuditoria` sin update/delete expuesto |
+| F1-T3 — Terminales PWA offline: Service Worker + IndexedDB (caché de catálogo + cola de escritura) | frontend-mostrador-kiosco-pos | `public/sw.js`, `lib/offline/*` (db.ts, queue.ts, autoDrenado.ts, useEstadoSync.ts, uuidv7.ts, registrarServiceWorker.ts), `components/pos/api.ts`, `app/pos/page.tsx`, `app/pos/nuevo/page.tsx`, `vitest.config.ts` + pruebas en `lib/offline/__tests__/*` y `components/pos/__tests__/api.test.ts` | LISTO — ver detalle y limitación conocida (creación de pedido 100% offline desde cero) en `README-DEMO.md` § F1-T3 |
+
+> **Gate de pruebas de Fase 1 — estado real (no dar por cerrado sin lo pendiente):**
+> Todo el código de F1-T1..F1-T6 está implementado y verificado a nivel de build +
+> tests unitarios (39 tests unitarios total entre `store-server` y `lib/offline`,
+> todos corridos y en verde por el orquestador, no solo reportados por los agentes).
+> Lo que **falta verificar en vivo**, porque este entorno de trabajo confirmadamente
+> no tiene Docker ni PostgreSQL instalados (se comprobó con `which docker`/`which psql`,
+> ambos ausentes):
+> 1. Los tests de integración (`store-server/test/integration/*`, incluye
+>    reintento idempotente de `POST /pedidos`, reembolso revierte stock, y el
+>    ciclo de sync outbox/inbox contra el mock-cloud) — escritos y compilando,
+>    **nunca ejecutados contra Postgres real**.
+> 2. Latencia real del bus WebSocket (objetivo ≤2s, RNF-01) con el backend y un
+>    cliente corriendo de verdad.
+> 3. Corte de LAN/internet real (no solo simulado en tests) con el flujo
+>    completo cajero→Store Server→KDS.
+>
+> **Acción requerida antes de considerar la Fase 1 cerrada de verdad:** correr
+> `docker compose -f store-server/docker-compose.test.yml up -d` (o un Postgres
+> real) + `npm run test:integration` en una máquina/CI con Docker disponible, y
+> levantar el Store Server + un cliente real para medir latencia WS y probar
+> cortes de LAN/internet en vivo. Esto no es un problema de código pendiente;
+> es una verificación que este entorno de trabajo no puede ejecutar.
+
+## Fase 2 (Producción) — Negocio + hardware (PLAN_DE_PRODUCCION.md §Fase 2)
+> Ver `PLAN_DE_PRODUCCION.md` (raíz del repo). F2-T1/T2/T3 construidos y verificados
+> (build + unit tests) por el orquestador en `store-server/`. F2-T4/T5 dependen de
+> hardware/PSP real que todavía no existe (ver S-02/S-05, ADR-0006) — se documentan
+> como adaptadores/interfaces, no como integración real.
+| Tarea | Dueño | Entregable | Estado |
+|-------|-------|------------|--------|
+| F2-T1 — Costeo por combinación (BOM por variante) | menu-inventario-pos | `store-server/src/costeo/*`, `Insumo.costoUnitario`, `RecetaModificador`, `GET /pedidos/:id/costeo` | LISTO — verificado por el orquestador (incluido en los 71/71 unit tests); integración sin ejecutar (gap de entorno) |
+| F2-T2 — Hold & fire (retener/marchar) | menu-inventario-pos + kds-cocina-pos | `store-server/src/ventas/*` (`retenerLinea`/`liberarLinea`/`liberarLineasRetenidas`), `LineaDePedido.retenida` | LISTO — verificado (unit tests); integración sin ejecutar (gap de entorno) |
+| F2-T3 — Reportes del día completos (ventas, mix, arqueo, daypart) | reportes-analitica-pos | `store-server/src/reportes/*` (reemplaza el endpoint básico de Fase 1) | LISTO — verificado; corrigió de paso un bug real (arqueo no restaba reembolsos en efectivo); integración sin ejecutar (gap de entorno) |
+| F2-T4 — Periféricos reales (ESC/POS, cajón, EMV P2PE) | hardware-perifericos-pos + pagos-pos | `store-server/src/hardware/*` (`ImpresoraAdapter`, `EscPosImpresoraAdapter`, `SimuladorImpresoraAdapter`), extensión aditiva de `PspAdapter` (`cancelarTransaccionPendiente`) | LISTO (código de protocolo ESC/POS real, bytes verificados contra la especificación pública) — verificado por el orquestador: build limpio, 102/102 unit tests. **Limitación permanente, no pendiente de código:** el transporte TCP nunca corrió contra una impresora física ni hay PSP real contratado; se valida en el piloto (F4-T1). El agente original falló a mitad de escribir la documentación (error de stream) — el orquestador revisó el código en disco, confirmó que compilaba y pasaba tests, y completó `store-server/README.md` §16 |
+| F2-T5 — Fiscalidad real FL/TX + pagos productivos | backend-ventas-pos + pagos-pos | — | PARCIAL — `ReglaDeImpuesto` por ubicación ya soporta FL/TX (S-06/S-08 resuelto con fuente oficial en Fase 0); integración de PSP real sigue bloqueada por S-05 (sin contrato comercial) |
+
+> **Nota honesta sobre F2-T4/F2-T5:** a diferencia de F2-T1/T2/T3, estas dos tareas
+> NO son resolubles solo con más ingeniería en este entorno — dependen de una
+> decisión comercial (PSP contratado) y una compra real (impresora/cajón/terminal
+> EMV) que todavía no existen (ver ADR-0006). Lo máximo responsable que se puede
+> construir ahora es la capa de adaptador/interfaz para que integrarlos después sea
+> un cambio acotado, no un rediseño — ver siguiente entrega.
+
+## Fase 3 (Producción) — Robustez y contingencia (PLAN_DE_PRODUCCION.md §Fase 3)
+> Ver `PLAN_DE_PRODUCCION.md` (raíz del repo), `docs/adr/0008-store-server-secundario-activo-pasivo.md`.
+> F3-T1/F3-T2 se desarrollaron en paralelo en este mismo sandbox; F3-T3 se resolvió
+> a nivel de diseño (ADR), no de código — ver justificación en el ADR.
+| Tarea | Dueño | Entregable | Estado |
+|-------|-------|------------|--------|
+| F3-T1 — Bajas con aprobación de calidad + alerta de merma (S-13) | menu-inventario-pos + seguridad-accesos-pos | `store-server/src/bajas/*` (`SolicitudBaja`, flujo solicitar→aprobar/rechazar, no toca `Stock` hasta aprobar), `Ubicacion.umbralMermaPorcentaje`, `TipoEventoAuditoria.alertaMerma`, `store-server/README.md` §17 | LISTO — verificado por el orquestador: build limpio, 19 suites/151 unit tests; integración escrita y compilando, sin ejecutar (gap de entorno, mismo de siempre). Supuesto documentado: "período de conteo" (S-13) = ventana móvil de 30 días, configurable por `INVENTARIO_PERIODO_MERMA_DIAS` |
+| F3-T2 — Contingencia operativa: monitoreo de conectividad + guía de gerente + requisitos de red | devops-despliegue-pos | `store-server/src/conectividad/*` (`ConectividadService`, evento `ConectividadCambiada`, `GET /api/v1/conectividad/estado`), `docs/operaciones/guia-contingencia-gerente.md`, `docs/operaciones/requisitos-red-tienda-piloto.md`, `store-server/README.md` §18 | LISTO (monitoreo de software) — build + `npm run test:unit` (19 suites/151 tests) verificados; integración (`test/integration/conectividad.integration.spec.ts`) escrita y compilando, sin ejecutar contra Postgres real (mismo gap de entorno que el resto del repo). El "failover a 4G/LTE" en sí es hardware de red (no software de este backend, ver §18.1 y la spec de red); queda documentado como especificación pendiente de compras/IT antes de F4-T1, no como código pendiente |
+| F3-T3 — Store Server secundario activo/pasivo (opcional) | devops-despliegue-pos | `docs/adr/0008-store-server-secundario-activo-pasivo.md` | DISEÑADO, NO IMPLEMENTADO — deliberado: requiere al menos dos instancias reales de PostgreSQL para validar streaming replication honestamente, y este entorno no tiene Postgres/Docker. Tarea marcada opcional en el plan; no bloquea nada posterior. Decisión de diseño: failover asistido por el gerente (no automático) para evitar riesgo de split-brain |
+
+> **Verificación consolidada de Fase 3 (build único, todo el trabajo concurrente integrado):**
+> `store-server`: `npm run build` limpio, `npm run test:unit` → **19 suites, 151/151
+> tests**, `git status` confirma que ningún agente tocó código fuera de su alcance
+> declarado. Sin colisiones de esquema Prisma entre F3-T1 y F3-T2 (F3-T2 no tocó
+> `schema.prisma`, decisión deliberada del agente para evitar el riesgo).
 
 ## Fase 1.5 — Andamiaje DEMO (orquestador)
 | Tarea | Dueño | Entregable | Estado |

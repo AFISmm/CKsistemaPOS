@@ -17,6 +17,9 @@ import type {
   Pago,
   Producto,
 } from "@/lib/domain/types";
+import { guardarCatalogoCache, obtenerCatalogoCache } from "@/lib/offline/db";
+import { encolarEscritura } from "@/lib/offline/queue";
+import { uuidv7 } from "@/lib/offline/uuidv7";
 
 export interface CatalogoResponse {
   categorias: Categoria[];
@@ -68,9 +71,15 @@ const BASE_URL = "/api/v1";
 /**
  * Error de API con mensaje amigable para mostrar en pantalla al cajero.
  *
- * `codigo` distingue los dos casos generados en el CLIENTE (sin conexion /
- * respuesta sin cuerpo JSON util, ver lib/i18n/erroresApi.ts) de los codigos
- * de dominio que ya vienen del backend (ej. "pedido_no_encontrado").
+ * `codigo` distingue los casos generados en el CLIENTE (sin conexion /
+ * respuesta sin cuerpo JSON util / encolada offline, ver lib/i18n/erroresApi.ts)
+ * de los codigos de dominio que ya vienen del backend (ej.
+ * "pedido_no_encontrado"). "ENCOLADO_SIN_CONEXION" (F1-T3) es el caso nuevo:
+ * la escritura NO se perdio, quedo en lib/offline/db.ts `colaEscritura` y se
+ * reintentara sola (ver lib/offline/autoDrenado.ts) — el cajero sigue viendo
+ * un error en pantalla (no se finge un exito que no ocurrio, ya que este
+ * modulo nunca recalcula totales), pero el indicador de pendientes
+ * (lib/offline/useEstadoSync.ts) muestra que la accion sigue en cola.
  */
 export class ErrorApi extends Error {
   status: number;
@@ -113,7 +122,18 @@ function extraerCodigoError(cuerpo: unknown): string | undefined {
   return undefined;
 }
 
+/** Parsea de vuelta el `body` (string JSON) que ya arma cada funcion de este modulo. */
+function cuerpoComoObjeto(body: BodyInit | null | undefined): unknown {
+  if (typeof body !== "string") return body ?? null;
+  try {
+    return JSON.parse(body);
+  } catch {
+    return body;
+  }
+}
+
 async function solicitar<T>(ruta: string, init?: RequestInit): Promise<T> {
+  const metodo = (init?.method ?? "GET").toUpperCase();
   let respuesta: Response;
   try {
     respuesta = await fetch(`${BASE_URL}${ruta}`, {
@@ -125,6 +145,25 @@ async function solicitar<T>(ruta: string, init?: RequestInit): Promise<T> {
       cache: "no-store",
     });
   } catch {
+    // Error de RED (no de respuesta HTTP: el fetch mismo no pudo completarse).
+    // Para escrituras (todo lo que no sea GET) no basta con mostrar un error:
+    // la encolamos en IndexedDB (lib/offline/db.ts `colaEscritura`) para que
+    // se reintente sola cuando vuelva la conexion (lib/offline/autoDrenado.ts),
+    // en vez de perder la accion del cajero silenciosamente.
+    if (metodo !== "GET") {
+      try {
+        await encolarEscritura(metodo, `${BASE_URL}${ruta}`, cuerpoComoObjeto(init?.body));
+      } catch {
+        // Si ni siquiera se pudo encolar (ej. IndexedDB no disponible en este
+        // navegador), seguimos igual: el cajero vera el error de conexion de
+        // abajo y podra reintentar la accion manualmente.
+      }
+      throw new ErrorApi(
+        "Sin conexion: la accion quedo pendiente de sincronizar y se reintentara automaticamente.",
+        0,
+        "ENCOLADO_SIN_CONEXION"
+      );
+    }
     throw new ErrorApi(
       "No hay conexion con el servidor. Revisa tu red e intenta de nuevo.",
       0,
@@ -160,17 +199,41 @@ async function solicitarPedido(ruta: string, init?: RequestInit): Promise<Pedido
   return pedido;
 }
 
-export function obtenerCatalogo(): Promise<CatalogoResponse> {
-  return solicitar<CatalogoResponse>("/catalogo");
+/**
+ * Catalogo: red primero; si falla (offline), cae al ultimo catalogo bueno
+ * cacheado en IndexedDB (F1-T3) para que el cajero pueda seguir armando
+ * pedidos con los precios/86 mas recientes que se alcanzaron a descargar.
+ * Si la red SI responde, se refresca el cache para la proxima caida.
+ */
+export async function obtenerCatalogo(): Promise<CatalogoResponse> {
+  try {
+    const datos = await solicitar<CatalogoResponse>("/catalogo");
+    void guardarCatalogoCache(datos).catch(() => {
+      // No bloquea la demo si IndexedDB no esta disponible.
+    });
+    return datos;
+  } catch (err) {
+    const cache = await obtenerCatalogoCache<CatalogoResponse>().catch(() => null);
+    if (cache) return cache.datos;
+    throw err;
+  }
 }
 
 export function crearPedido(input?: {
   nombreCliente?: string;
   canal?: string;
 }): Promise<Pedido> {
+  // idempotencyKey (uuid v7, C-ID): id generado por el CLIENTE para esta
+  // creacion de pedido. Las rutas actuales de app/api/v1/pedidos ignoran
+  // campos extra del body (siguen asignando `Pedido.id` en el servidor via
+  // `uid()`, ver lib/db/store.ts) — esto es preparacion adelantada para
+  // cuando el Store Server (tarea paralela) empiece a exigir/usar esta clave
+  // para deduplicar creaciones reintentadas desde la cola offline.
+  const idempotencyKey = uuidv7();
   return solicitarPedido("/pedidos", {
     method: "POST",
-    body: JSON.stringify(input ?? {}),
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ ...(input ?? {}), idempotencyKey }),
   });
 }
 
@@ -221,8 +284,14 @@ export function aplicarDescuento(pedidoId: string, body: DescuentoBody): Promise
 }
 
 export function registrarPago(body: PagoBody): Promise<PagoResponse> {
+  // idempotencyKey (uuid v7, C-ID): mismo criterio que crearPedido() arriba —
+  // id generado por el CLIENTE, enviado ya hoy (el backend actual lo ignora)
+  // para que el Store Server futuro pueda deduplicar un pago reintentado
+  // desde la cola offline sin cobrar dos veces.
+  const idempotencyKey = uuidv7();
   return solicitar<PagoResponse>("/pagos", {
     method: "POST",
-    body: JSON.stringify(body),
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ ...body, idempotencyKey }),
   });
 }

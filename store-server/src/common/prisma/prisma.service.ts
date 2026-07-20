@@ -1,0 +1,26 @@
+import { INestApplication, Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { PrismaClient } from "@prisma/client";
+
+/**
+ * Cliente Prisma como servicio Nest inyectable (singleton por proceso). Unico
+ * punto de acceso a PostgreSQL local (fuente de verdad de la tienda, ADR-0004).
+ */
+@Injectable()
+export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(PrismaService.name);
+
+  async onModuleInit(): Promise<void> {
+    await this.$connect();
+    this.logger.log("Conexion a PostgreSQL establecida");
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    await this.$disconnect();
+  }
+
+  async enableShutdownHooks(app: INestApplication): Promise<void> {
+    process.on("beforeExit", () => {
+      void app.close();
+    });
+  }
+}

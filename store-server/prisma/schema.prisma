@@ -1,0 +1,639 @@
+// Store Server — esquema de datos (Fase 1, F1-T1/F1-T2).
+//
+// Fuente vinculante: docs/arquitectura.md §5 (modelo de datos) y §5.2 (reglas
+// de integridad transversales). Nombres de entidades y campos EXACTOS al
+// contrato (C-NOMBRES): PascalCase para modelos, camelCase para campos, en
+// espanol. No renombrar.
+//
+// Decisiones de tipos:
+//  - C-DINERO: todos los montos son Decimal(12,2) (NUNCA Float/Int aproximado).
+//    Tasas de impuesto son Decimal(6,4) (ej 0.0825 = 8.25%).
+//  - C-ID: los ids son String (UUID v7). Las entidades transaccionales
+//    (Pedido, Pago, LineaDePedido, LineaModificador) aceptan el id que envia
+//    el cliente/tienda (ver src/common/util/uuid.ts, validarUuidV7); el resto
+//    de entidades genera su id en el servidor con uuidv7().
+//  - C-TENANT: toda entidad transaccional lleva ubicacionId.
+//  - C-SNAPSHOT: LineaDePedido/LineaModificador/Pago congelan nombre/precio/
+//    impuesto al momento de la venta; nunca son FK "vivas" a Producto/Modificador
+//    para efectos de calculo (si guardan la FK para trazabilidad, pero los
+//    campos de negocio son copias).
+//  - Cantidades de insumo/stock: Decimal(14,3) para admitir unidades fraccionarias
+//    (kg, L) sin perder precision.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums (vinculantes, ver arquitectura.md §5.1) ----------
+
+enum EstadoUbicacion {
+  FL
+  TX
+}
+
+enum CanalPedido {
+  mostrador
+  kiosco
+  online
+  delivery
+  catering
+}
+
+enum EstadoPedido {
+  abierto
+  enviadoCocina
+  enPreparacion
+  listo
+  entregado
+  cobrado
+  cancelado
+}
+
+enum EstadoCocina {
+  recibido
+  preparando
+  listo
+}
+
+enum MetodoPago {
+  efectivo
+  tarjeta
+  otro
+}
+
+enum EstadoPago {
+  aprobado
+  rechazado
+  pendiente
+  reembolsado
+  encolado
+}
+
+enum TipoModificador {
+  agregar
+  sin
+  sustituir
+}
+
+enum EstadoTurno {
+  abierto
+  cerrado
+}
+
+// Tipos de EventoDeAuditoria (RNF-07, C-AUDIT). Ampliable sin romper el
+// contrato (nuevo valor = nueva entrada de enum + migracion).
+enum TipoEventoAuditoria {
+  descuentoAplicado
+  reembolso
+  cancelacion
+  ajusteInventario
+  aperturaCajon
+  producto86
+  cierreZ
+  ventaConfirmada
+  pagoRegistrado
+  aperturaTurno
+  /// F3-T1 (Bajas con aprobacion de calidad): SolicitudBaja rechazada por el
+  /// gerente. La aprobacion NO tiene un tipo propio: reusa "ajusteInventario"
+  /// porque InventarioService.aplicarMovimiento (unico punto de escritura de
+  /// Stock) ya audita CUALQUIER movimiento de stock con ese tipo, incluida
+  /// una merma aprobada (ver InventarioService.registrarMermaAprobada). El
+  /// rechazo, en cambio, NUNCA toca Stock, asi que "ajusteInventario" seria
+  /// enganoso; se le da un tipo propio.
+  bajaRechazada
+  /// F3-T1 (S-13): alerta de auditoria SEPARADA de "ajusteInventario" cuando
+  /// la merma acumulada de un insumo/ubicacion en el periodo supera el
+  /// umbral configurable (Ubicacion.umbralMermaPorcentaje). Visible al
+  /// gerente de tienda (ver BajasService.evaluarUmbralYAuditar).
+  alertaMerma
+}
+
+/// Motivo controlado de una SolicitudBaja (F3-T1). Lista corta y cerrada
+/// (enum de Postgres, no string libre) para reportes/analitica consistentes;
+/// "otro" cubre el resto sin bloquear el flujo. Ampliable de forma aditiva.
+enum MotivoBaja {
+  caducado
+  danado
+  errorConteo
+  otro
+}
+
+/// Estado de una SolicitudBaja (F3-T1). Maquina de 3 estados, solo transita
+/// UNA vez desde "pendiente" (a "aprobada" o "rechazada"); ver
+/// BajasService.aprobarBaja/rechazarBaja (409 si ya no esta "pendiente").
+enum EstadoSolicitudBaja {
+  pendiente
+  aprobada
+  rechazada
+}
+
+// ---------- Entidades núcleo ----------
+
+model Ubicacion {
+  id          String          @id
+  codigo      String          @unique
+  nombre      String
+  estado      EstadoUbicacion
+  zonaHoraria String
+  direccion   String
+  moneda      String          @default("USD")
+  activo      Boolean         @default(true)
+  /// F3-T1 (S-13): umbral de merma permitido por periodo de conteo antes de
+  /// disparar EventoDeAuditoria tipo "alertaMerma", expresado en PUNTOS
+  /// PORCENTUALES (3 = 3%), configurable POR TIENDA (no hardcodeado en
+  /// codigo). Default 3 = valor inicial de S-13, "a validar con operaciones
+  /// antes de Fase 3" segun el propio supuesto — este campo es exactamente lo
+  /// que permite ese ajuste sin migracion nueva.
+  umbralMermaPorcentaje Decimal @default(3) @db.Decimal(5, 2)
+
+  reglasImpuesto   ReglaDeImpuesto[]
+  stock            Stock[]
+  pedidos          Pedido[]
+  turnos           Turno[]
+  usuarios         Usuario[]
+  eventosAuditoria EventoDeAuditoria[]
+  eventosDominio   EventoDominio[]
+  solicitudesBaja  SolicitudBaja[]
+
+  @@map("ubicaciones")
+}
+
+model ReglaDeImpuesto {
+  id             String    @id
+  ubicacionId    String
+  jurisdiccion   String
+  nombre         String
+  /// Tasa decimal, ej 0.0825 = 8.25% (S-06/S-08, confirmar con finanzas).
+  tasa           Decimal   @db.Decimal(6, 4)
+  vigenteDesde   DateTime  @db.Date
+  vigenteHasta   DateTime? @db.Date
+  aplicaAExentos Boolean   @default(false)
+  /// Version del registro para el inbox de sincronizacion (F1-T5,
+  /// arquitectura.md §4.5, Last-Writer-Wins). La nube es arbitro de la config
+  /// corporativa: un cambio entrante solo se aplica si trae `version` mayor a
+  /// la local (ver src/sync/inbox.service.ts). Campo aditivo, no afecta el
+  /// calculo de impuesto (VentasModule solo lee tasa/vigencias).
+  version        Int       @default(1)
+
+  ubicacion Ubicacion @relation(fields: [ubicacionId], references: [id])
+
+  @@index([ubicacionId, vigenteDesde, vigenteHasta])
+  @@map("reglas_impuesto")
+}
+
+model Categoria {
+  id     String  @id
+  nombre String
+  orden  Int     @default(0)
+  activo Boolean @default(true)
+
+  productos Producto[]
+
+  @@map("categorias")
+}
+
+model Producto {
+  id           String  @id
+  categoriaId  String
+  nombre       String
+  descripcion  String  @default("")
+  /// Precio base en dolares, Decimal(12,2) (C-DINERO).
+  precioBase   Decimal @db.Decimal(12, 2)
+  gravable     Boolean @default(true)
+  esCombo      Boolean @default(false)
+  disponible86 Boolean @default(true)
+  activo       Boolean @default(true)
+
+  categoria         Categoria          @relation(fields: [categoriaId], references: [id])
+  combo             Combo?
+  gruposModificador GrupoModificador[]
+  recetas           Receta[]
+  lineasDePedido    LineaDePedido[]
+
+  @@index([categoriaId])
+  @@map("productos")
+}
+
+/// Combo: el producto "envoltorio" mas sus slots de seleccion. `componentes`
+/// es JSON con la forma ComboComponente[] = { grupoSeleccion, obligatorio,
+/// opciones: string[] (ids de Producto) } — arquitectura.md §5.1.
+model Combo {
+  id          String @id
+  productoId  String @unique
+  componentes Json
+
+  producto Producto @relation(fields: [productoId], references: [id])
+
+  @@map("combos")
+}
+
+model GrupoModificador {
+  id             String  @id
+  productoId     String
+  nombre         String
+  minSelecciones Int     @default(0)
+  maxSelecciones Int     @default(1)
+  obligatorio    Boolean @default(false)
+
+  producto      Producto      @relation(fields: [productoId], references: [id])
+  modificadores Modificador[]
+
+  @@index([productoId])
+  @@map("grupos_modificador")
+}
+
+model Modificador {
+  id                 String          @id
+  grupoModificadorId String
+  nombre             String
+  /// Delta de precio en dolares (0 si "sin X"). Puede ser negativo (sustituir).
+  precioDelta        Decimal         @db.Decimal(12, 2)
+  disponible86       Boolean         @default(true)
+  tipo               TipoModificador
+
+  grupoModificador    GrupoModificador    @relation(fields: [grupoModificadorId], references: [id])
+  lineaModificadores  LineaModificador[]
+  recetaModificadores RecetaModificador[]
+
+  @@index([grupoModificadorId])
+  @@map("modificadores")
+}
+
+/// RecetaModificador — BOM por variante (F2-T1). Delta de insumo que introduce
+/// UN Modificador concreto sobre la receta base del Producto al que se aplica
+/// (arquitectura.md §5.1/§9.3: "cada combo/modificador resuelve su costo real
+/// aunque el precio sea fijo"). `cantidadDelta` es POSITIVO si el modificador
+/// agrega insumo (ej. "Extra queso" -> +0.1 lb de queso) y NEGATIVO si lo
+/// quita o sustituye (ej. "Sin queso" -> -0.2 lb, o el lado que se resta al
+/// cambiar de combo). Opcional por diseno: un Modificador sin filas aqui
+/// simplemente no afecta el costo (ej. una salsa gratis sin insumo trackeado
+/// todavia). Tabla nueva, aditiva; no toca Modificador.precioDelta (lo que
+/// paga el cliente) ni ningun calculo de VentasModule.
+model RecetaModificador {
+  id            String  @id
+  modificadorId String
+  insumoId      String
+  cantidadDelta Decimal @db.Decimal(14, 3)
+
+  modificador Modificador @relation(fields: [modificadorId], references: [id])
+  insumo      Insumo      @relation(fields: [insumoId], references: [id])
+
+  @@index([modificadorId])
+  @@index([insumoId])
+  @@map("receta_modificadores")
+}
+
+model Insumo {
+  id              String  @id
+  nombre          String
+  unidadMedida    String
+  /// Umbral de stock bajo (HU-INV-03 CA2), misma unidad que Stock.cantidadActual.
+  umbralStockBajo Decimal @db.Decimal(14, 3)
+  /// Costo unitario vigente del insumo, misma unidad que unidadMedida (F2-T1,
+  /// costeo por combinacion/BOM por variante). Campo aditivo: default 0 no
+  /// rompe ninguna fila existente. Lo usa CosteoService para resolver el
+  /// costo real de una linea vendida (nunca el precio al cliente, que sigue
+  /// viniendo de Producto/Modificador/Combo — C-SNAPSHOT no se toca).
+  costoUnitario   Decimal @default(0) @db.Decimal(12, 4)
+
+  recetaInsumos       RecetaInsumo[]
+  recetaModificadores RecetaModificador[]
+  stock               Stock[]
+  solicitudesBaja     SolicitudBaja[]
+
+  @@map("insumos")
+}
+
+model Receta {
+  id         String  @id
+  productoId String
+  activo     Boolean @default(true)
+
+  producto      Producto       @relation(fields: [productoId], references: [id])
+  recetaInsumos RecetaInsumo[]
+
+  @@index([productoId])
+  @@map("recetas")
+}
+
+model RecetaInsumo {
+  id       String  @id
+  recetaId String
+  insumoId String
+  cantidad Decimal @db.Decimal(14, 3)
+
+  receta Receta @relation(fields: [recetaId], references: [id])
+  insumo Insumo @relation(fields: [insumoId], references: [id])
+
+  @@index([recetaId])
+  @@index([insumoId])
+  @@map("receta_insumos")
+}
+
+/// Nivel de insumo por ubicacion (S-12). Se mueve por EVENTOS de movimiento
+/// (venta/merma/recepcion/reversa) via InventarioService.aplicarMovimiento;
+/// nunca por sobrescritura directa de cantidadActual (arq. 4.5).
+model Stock {
+  id             String   @id
+  ubicacionId    String
+  insumoId       String
+  cantidadActual Decimal  @db.Decimal(14, 3)
+  actualizadoEn  DateTime @updatedAt
+
+  ubicacion Ubicacion @relation(fields: [ubicacionId], references: [id])
+  insumo    Insumo    @relation(fields: [insumoId], references: [id])
+
+  @@unique([ubicacionId, insumoId])
+  @@map("stock")
+}
+
+/// SolicitudBaja — F3-T1 (PLAN_DE_PRODUCCION.md Fase 3): "la baja no impacta
+/// stock hasta ser aprobada". Registro de una baja/merma propuesta por
+/// cualquier usuario con permiso `inventario.solicitarBaja` (tipicamente
+/// cajero/cocina, quienes detectan producto vencido/danado en el mostrador o
+/// la linea). NO tiene FK "viva" a Stock ni lo muta al crearse: solo
+/// `BajasService.aprobarBaja` (permiso `inventario.aprobarBaja`, gerente)
+/// mueve stock, via InventarioService.registrarMermaAprobada (el UNICO punto
+/// de escritura de Stock, arq. 4.5 — nunca se duplica esa logica aqui).
+model SolicitudBaja {
+  id              String              @id
+  ubicacionId     String
+  insumoId        String
+  /// Cantidad a dar de baja, MISMA precision/unidad que Stock.cantidadActual
+  /// (Decimal 14,3). Siempre positiva; el signo (resta) lo aplica
+  /// InventarioService al aprobar, nunca se guarda como delta negativo aqui.
+  cantidad        Decimal             @db.Decimal(14, 3)
+  motivo          MotivoBaja
+  /// Nota libre (ej. numero de lote/batch, "vencio 2026-07-15"). No es parte
+  /// del motivo controlado; es la etiqueta que pide F3-T1 explicitamente.
+  etiqueta        String              @default("")
+  solicitadoPorId String
+  solicitadoEn    DateTime            @default(now())
+  estado          EstadoSolicitudBaja @default(pendiente)
+  revisadoPorId   String?
+  revisadoEn      DateTime?
+  /// Motivo de rechazo (solo se llena si estado="rechazada"); null en
+  /// pendiente/aprobada.
+  motivoRechazo   String?
+  /// Valor en dolares de ESTA baja, CONGELADO al momento de aprobar
+  /// (cantidad * Insumo.costoUnitario vigente en ese instante, mismo espiritu
+  /// que C-SNAPSHOT: si el costo unitario del insumo cambia despues, el
+  /// historial de merma del periodo no debe recalcularse retroactivamente).
+  /// null mientras esta pendiente/rechazada (nunca se valoriza algo que no
+  /// impacto stock).
+  valorEstimado   Decimal?            @db.Decimal(12, 4)
+
+  ubicacion     Ubicacion @relation(fields: [ubicacionId], references: [id])
+  insumo        Insumo    @relation(fields: [insumoId], references: [id])
+  solicitadoPor Usuario   @relation("SolicitudBajaSolicitante", fields: [solicitadoPorId], references: [id])
+  revisadoPor   Usuario?  @relation("SolicitudBajaRevisor", fields: [revisadoPorId], references: [id])
+
+  @@index([ubicacionId, estado])
+  @@index([insumoId, estado])
+  @@map("solicitudes_baja")
+}
+
+/// Pedido — el ticket de venta. id = UUID v7 generado en cliente/tienda,
+/// aceptado tal cual (C-ID); POST /api/v1/pedidos es idempotente por este id.
+model Pedido {
+  id               String       @id
+  ubicacionId      String
+  turnoId          String
+  /// Secuencial por turno (RN-06), lo asigna el Store Server (NO es el id).
+  numeroOrden      Int
+  nombreCliente    String       @default("")
+  canal            CanalPedido  @default(mostrador)
+  estado           EstadoPedido @default(abierto)
+  subtotal         Decimal      @default(0) @db.Decimal(12, 2)
+  descuentoTotal   Decimal      @default(0) @db.Decimal(12, 2)
+  impuestoTotal    Decimal      @default(0) @db.Decimal(12, 2)
+  propinaTotal     Decimal      @default(0) @db.Decimal(12, 2)
+  total            Decimal      @default(0) @db.Decimal(12, 2)
+  creadoEn         DateTime     @default(now())
+  enviadoACocinaEn DateTime?
+  entregadoEn      DateTime?
+  cerradoEn        DateTime?
+
+  ubicacion Ubicacion       @relation(fields: [ubicacionId], references: [id])
+  turno     Turno           @relation(fields: [turnoId], references: [id])
+  lineas    LineaDePedido[]
+  pagos     Pago[]
+
+  @@unique([turnoId, numeroOrden])
+  @@index([ubicacionId, estado])
+  @@map("pedidos")
+}
+
+/// LineaDePedido: snapshot de precio/descripcion/gravable al momento de vender
+/// (C-SNAPSHOT). productoId se conserva para trazabilidad/reportes, pero NUNCA
+/// se relee Producto para recalcular una linea ya creada.
+model LineaDePedido {
+  id                        String       @id
+  pedidoId                  String
+  productoId                String
+  descripcion               String
+  cantidad                  Int
+  precioUnitario            Decimal      @db.Decimal(12, 2)
+  subtotalLinea             Decimal      @db.Decimal(12, 2)
+  gravable                  Boolean
+  notas                     String       @default("")
+  estadoCocina              EstadoCocina @default(recibido)
+  /// F2-T1 (BOM por variante): ids de Producto efectivamente seleccionados
+  /// para los slots de un Combo, cuando esta linea es un combo (Combo.componentes
+  /// referencia ids de Producto por slot). Campo ADITIVO solo para costeo real
+  /// (CosteoService); NUNCA se lee para recalcular precioUnitario/subtotalLinea
+  /// (que siguen siendo el snapshot congelado de VentasService, C-SNAPSHOT
+  /// intacto). Vacio ([]) si el producto no es combo o no se informo seleccion.
+  comboSeleccionProductoIds String[]     @default([])
+  /// F2-T2 (Hold & fire): si es true, la linea se retiene y queda EXCLUIDA del
+  /// proximo TicketEnviadoACocina (inicial o de liberacion) hasta que se llame
+  /// explicitamente a /liberar. Ver VentasService.retenerLinea/liberarLinea.
+  retenida                  Boolean      @default(false)
+  /// F2-T2: momento en que ESTA linea (no el pedido completo) fue efectivamente
+  /// incluida en un TicketEnviadoACocina (enviar-cocina inicial o liberacion
+  /// individual/bulk). null = todavia no se envio a cocina. Se usa para NO
+  /// re-enviar/duplicar el ticket de una linea ya enviada (idempotencia de liberar).
+  enviadaACocinaEn          DateTime?
+  /// F2-T2: momento en que se liberó explícitamente vía /liberar o
+  /// /liberar-retenidas (distinto de enviadaACocinaEn: una línea nunca retenida
+  /// que sale en el envío inicial tiene enviadaACocinaEn pero NO liberadaACocinaEn).
+  liberadaACocinaEn         DateTime?
+
+  pedido        Pedido             @relation(fields: [pedidoId], references: [id])
+  producto      Producto           @relation(fields: [productoId], references: [id])
+  modificadores LineaModificador[]
+
+  @@index([pedidoId])
+  @@map("lineas_de_pedido")
+}
+
+model LineaModificador {
+  id              String          @id
+  lineaDePedidoId String
+  modificadorId   String
+  descripcion     String
+  precioDelta     Decimal         @db.Decimal(12, 2)
+  tipo            TipoModificador
+
+  lineaDePedido LineaDePedido @relation(fields: [lineaDePedidoId], references: [id])
+  modificador   Modificador   @relation(fields: [modificadorId], references: [id])
+
+  @@index([lineaDePedidoId])
+  @@map("lineas_modificador")
+}
+
+/// Pago — id UUID v7 (cliente o servidor). C-PCI: SOLO token/referencia/marca/
+/// ultimos4; JAMAS PAN/CVV/pista.
+model Pago {
+  id            String     @id
+  pedidoId      String
+  turnoId       String
+  metodo        MetodoPago
+  monto         Decimal    @db.Decimal(12, 2)
+  propina       Decimal    @default(0) @db.Decimal(12, 2)
+  estado        EstadoPago
+  pspTokenId    String?
+  pspReferencia String?
+  ultimos4      String?
+  marca         String?
+  montoRecibido Decimal?   @db.Decimal(12, 2)
+  cambio        Decimal?   @db.Decimal(12, 2)
+  creadoEn      DateTime   @default(now())
+
+  pedido Pedido @relation(fields: [pedidoId], references: [id])
+  turno  Turno  @relation(fields: [turnoId], references: [id])
+
+  @@index([pedidoId])
+  @@index([turnoId, estado])
+  @@map("pagos")
+}
+
+model Turno {
+  id                String      @id
+  ubicacionId       String
+  usuarioAperturaId String
+  abiertoEn         DateTime    @default(now())
+  cerradoEn         DateTime?
+  fondoInicial      Decimal     @default(0) @db.Decimal(12, 2)
+  efectivoContado   Decimal?    @db.Decimal(12, 2)
+  diferencia        Decimal?    @db.Decimal(12, 2)
+  estado            EstadoTurno @default(abierto)
+  /// Snapshot inmutable del cierre Z (HU-PAG-08 CA3); null hasta cerrarTurnoZ.
+  reporteZ          Json?
+  /// Contador para asignar numeroOrden secuencial (RN-06). Solo lo muta el
+  /// Store Server dentro de una transaccion al crear un Pedido.
+  ultimoNumeroOrden Int         @default(0)
+
+  ubicacion       Ubicacion @relation(fields: [ubicacionId], references: [id])
+  usuarioApertura Usuario   @relation(fields: [usuarioAperturaId], references: [id])
+  pedidos         Pedido[]
+  pagos           Pago[]
+
+  @@index([ubicacionId, estado])
+  @@map("turnos")
+}
+
+model Rol {
+  id       String   @id
+  nombre   String   @unique
+  /// Claves de permiso granulares (ej. "pedido.descuento.autorizar").
+  permisos String[]
+
+  usuarios Usuario[]
+
+  @@map("roles")
+}
+
+model Usuario {
+  id          String  @id
+  ubicacionId String
+  nombre      String
+  /// Hash bcrypt del PIN (S-10, RNF-08). JAMAS PIN en claro ni logueado.
+  pinHash     String
+  rolId       String
+  activo      Boolean @default(true)
+
+  ubicacion        Ubicacion           @relation(fields: [ubicacionId], references: [id])
+  rol              Rol                 @relation(fields: [rolId], references: [id])
+  turnosAbiertos   Turno[]
+  eventosAuditoria EventoDeAuditoria[]
+  /// F3-T1: bajas que este Usuario solicito (cualquier rol con
+  /// inventario.solicitarBaja) vs. bajas que revisó como gerente (aprobo/
+  /// rechazo, inventario.aprobarBaja). Dos relaciones nombradas porque ambas
+  /// apuntan a la MISMA tabla SolicitudBaja.
+  solicitudesBajaSolicitadas SolicitudBaja[] @relation("SolicitudBajaSolicitante")
+  solicitudesBajaRevisadas   SolicitudBaja[] @relation("SolicitudBajaRevisor")
+
+  @@index([ubicacionId])
+  @@map("usuarios")
+}
+
+/// Bitacora inmutable append-only (RNF-07, C-AUDIT). Ningun endpoint expone
+/// update/delete sobre esta entidad (ver SeguridadModule).
+model EventoDeAuditoria {
+  id           String              @id
+  ubicacionId  String
+  usuarioId    String?
+  tipo         TipoEventoAuditoria
+  agregadoTipo String
+  agregadoId   String
+  motivo       String
+  payload      Json
+  ocurridoEn   DateTime            @default(now())
+
+  ubicacion Ubicacion @relation(fields: [ubicacionId], references: [id])
+  usuario   Usuario?  @relation(fields: [usuarioId], references: [id])
+
+  @@index([ubicacionId, ocurridoEn])
+  @@index([agregadoTipo, agregadoId])
+  @@map("eventos_de_auditoria")
+}
+
+/// EventoDominio — log de eventos de negocio append-only. Sirve DOS
+/// propositos con una sola escritura (EventosService.emitir):
+///  1) Fuente de replay del bus WebSocket (arquitectura.md §6.3).
+///  2) Outbox de sincronizacion a la nube (arquitectura.md §6.4, F1-T5): el
+///     futuro agente de sync hace `WHERE sincronizadoEn IS NULL ORDER BY
+///     ocurridoEn` y marca `sincronizadoEn` al confirmar el ack de la nube.
+/// No se construye aqui el cliente HTTPS/mTLS de sync (fuera de alcance de
+/// esta tarea); la tabla queda lista para que ese agente la consuma.
+model EventoDominio {
+  id             String    @id
+  /// Nombre canonico del evento (PascalCase, pasado) — ver arquitectura.md §6.3.
+  tipo           String
+  agregadoTipo   String
+  agregadoId     String
+  ubicacionId    String
+  ocurridoEn     DateTime  @default(now())
+  payload        Json
+  /// Version del envelope (permite evolucionar el payload sin romper consumidores).
+  version        Int       @default(1)
+  /// null = pendiente de sincronizar a la nube; se completa al recibir ack (F1-T5).
+  sincronizadoEn DateTime?
+
+  ubicacion Ubicacion @relation(fields: [ubicacionId], references: [id])
+
+  @@index([sincronizadoEn, ocurridoEn])
+  @@index([ubicacionId, ocurridoEn])
+  @@map("eventos_dominio")
+}
+
+/// SyncEstado — bookkeeping del agente de sincronizacion (F1-T5), lado INBOX
+/// (nube -> tienda, arquitectura.md §4.4 punto 4 y §6.4). Guarda el cursor
+/// (`ultimaVersionAplicada`) de la ultima version de configuracion aplicada
+/// desde `GET /sync/config?desde=version`, para no re-pedir el historial
+/// completo en cada arranque. Fila unica de clave fija ("inbox"); NO forma
+/// parte del modelo de dominio de arquitectura.md §5 (es infraestructura de
+/// sincronizacion, igual que EventoDominio lo es para el outbox).
+model SyncEstado {
+  id                    String   @id
+  ultimaVersionAplicada Int      @default(0)
+  actualizadoEn         DateTime @updatedAt
+
+  @@map("sync_estado")
+}

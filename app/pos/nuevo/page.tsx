@@ -39,6 +39,7 @@ import ProductosGrid from "@/components/pos/ProductosGrid";
 import ModificadorModal from "@/components/pos/ModificadorModal";
 import DescuentoModal from "@/components/pos/DescuentoModal";
 import Ticket from "@/components/pos/Ticket";
+import { useEstadoSync } from "@/lib/offline/useEstadoSync";
 
 // DEMO: sin login de cajero en esta pantalla; se usa el usuario demo sembrado
 // en lib/db/store.ts (rol cajero) para las acciones que requieren usuarioId.
@@ -63,20 +64,8 @@ export default function NuevoPedidoPage() {
   const [aplicandoDescuento, setAplicandoDescuento] = useState(false);
   const [errorDescuento, setErrorDescuento] = useState<string | null>(null);
 
-  const [sinConexion, setSinConexion] = useState(false);
-
-  // ---------- Deteccion de estado offline (visible, sin bloquear al cajero) ----------
-  useEffect(() => {
-    if (typeof navigator !== "undefined") setSinConexion(!navigator.onLine);
-    const marcarOnline = () => setSinConexion(false);
-    const marcarOffline = () => setSinConexion(true);
-    window.addEventListener("online", marcarOnline);
-    window.addEventListener("offline", marcarOffline);
-    return () => {
-      window.removeEventListener("online", marcarOnline);
-      window.removeEventListener("offline", marcarOffline);
-    };
-  }, []);
+  // ---------- Estado offline (visible, sin bloquear al cajero) + cola F1-T3 ----------
+  const { sinConexion, pendientes } = useEstadoSync();
 
   // ---------- Inicializacion: crear pedido + cargar catalogo ----------
   const iniciar = useCallback(async () => {
@@ -301,9 +290,9 @@ export default function NuevoPedidoPage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {sinConexion && (
+          {(sinConexion || pendientes > 0) && (
             <span className="rounded-full bg-ck-gold/20 px-3 py-1 text-xs font-semibold text-ck-gold">
-              {t("pos.sinConexion")}
+              {pendientes > 0 ? t("pos.pendientesSincronizar", { n: pendientes }) : t("pos.sinConexion")}
             </span>
           )}
         </div>

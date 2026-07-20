@@ -51,6 +51,7 @@ import Ticket from "@/components/pos/Ticket";
 import DescuentoModal from "@/components/pos/DescuentoModal";
 import CobroModal from "@/components/pos/CobroModal";
 import ReciboModal from "@/components/pos/ReciboModal";
+import { useEstadoSync } from "@/lib/offline/useEstadoSync";
 
 // DEMO: sin login de cajero en esta pantalla; se usa el usuario demo sembrado
 // en lib/db/store.ts (rol cajero) para las acciones que requieren usuarioId.
@@ -107,20 +108,8 @@ export default function TerminalCajeroPage() {
   const [pagosRealizados, setPagosRealizados] = useState<Pago[]>([]);
   const [mostrarRecibo, setMostrarRecibo] = useState(false);
 
-  const [sinConexion, setSinConexion] = useState(false);
-
-  // ---------- Deteccion de estado offline (visible, sin bloquear al cajero) ----------
-  useEffect(() => {
-    if (typeof navigator !== "undefined") setSinConexion(!navigator.onLine);
-    const marcarOnline = () => setSinConexion(false);
-    const marcarOffline = () => setSinConexion(true);
-    window.addEventListener("online", marcarOnline);
-    window.addEventListener("offline", marcarOffline);
-    return () => {
-      window.removeEventListener("online", marcarOnline);
-      window.removeEventListener("offline", marcarOffline);
-    };
-  }, []);
+  // ---------- Estado offline (visible, sin bloquear al cajero) + cola F1-T3 ----------
+  const { sinConexion, pendientes } = useEstadoSync();
 
   // ---------- Carga de la lista "por cobrar" (poll + refresh manual) ----------
   const cargarLista = useCallback(async () => {
@@ -306,9 +295,9 @@ export default function TerminalCajeroPage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {sinConexion && (
+          {(sinConexion || pendientes > 0) && (
             <span className="rounded-full bg-ck-gold/20 px-3 py-1 text-xs font-semibold text-ck-gold">
-              {t("pos.sinConexion")}
+              {pendientes > 0 ? t("pos.pendientesSincronizar", { n: pendientes }) : t("pos.sinConexion")}
             </span>
           )}
         </div>

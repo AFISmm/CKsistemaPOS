@@ -263,8 +263,9 @@ disponible en toda la app, con entrada/salida por texto o por voz.
 | **Hardware** | Impresora, cajon, lector EMV, escaner = stubs que loguean a consola (`lib/hardware/`). | Drivers ESC/POS reales, SDK EMV, etc. |
 | **Impuestos** | Tasas DEMO: FL 7% (Miami-Dade), TX 8.25%. | Tasas confirmadas por finanzas (S-06/S-08). |
 | **Precios y recetas** | DEMO razonables tipo fast-casual (el sitio no publica precios/recetas). | Precios y recetas oficiales de Chicken Kitchen. |
-| **IDs** | UUID v4 (`crypto.randomUUID`). | UUID v7 ordenable (C-ID). |
+| **IDs** | `Pedido.id`/`Pago.id`/etc. los sigue asignando el SERVIDOR en UUID v4 (`lib/db/store.ts` `uid()`; su migracion a v7 es F1-T5, tarea de `devops-despliegue-pos`/`backend-ventas-pos`). El CLIENTE (F1-T3) ya genera UUID v7 (`lib/offline/uuidv7.ts`) para el id de cada entrada de la cola offline y para una `idempotencyKey` que viaja (ignorada hoy) en el body/header `Idempotency-Key` de "crear pedido" y "registrar pago" — preparacion adelantada para cuando el Store Server empiece a exigirla. | UUID v7 ordenable end-to-end (C-ID), servidor incluido. |
 | **Eventos en vivo** | Polling HTTP (KDS/CFD). | Bus WebSocket/NATS en LAN (ADR-0003). |
+| **Offline del terminal de cajero (F1-T3)** | Service Worker (`public/sw.js`, cache-primero + revalidacion del app shell) + IndexedDB (`lib/offline/db.ts`: `catalogoCache` y `colaEscritura`) + drenado automatico al reconectar (`lib/offline/autoDrenado.ts`, `queue.ts`). Cubre: catalogo disponible sin red (fallback a cache), y escrituras del cajero (agregar linea, descuento, enviar a cocina, cobrar) que se encolan y reproducen en orden si la red falla a mitad de turno. NO cubre: iniciar un pedido totalmente nuevo con cero red desde el primer instante (el backend DEMO asigna `Pedido.id`/numero de orden en el servidor; no hay reconciliacion de un id temporal todavia — ver limitacion documentada abajo). | Store Server local (ADR-0002) con outbox/inbox real, ids v7 aceptados end-to-end y reconciliacion de pedidos creados 100% offline (F1-T5). |
 | **PIN / auth** | Hash de demo (`demo:1234`). | bcrypt/argon2 (S-10). |
 | **SSN (auto-registro de empleado en /login)** | Mismo principio C-PCI que `Pago` (solo token + ultimos4, nunca PAN/CVV) y que la verificacion facial (nunca biometria real): el formulario de auto-registro SOLO captura/envia/almacena `Empleado.ssnUltimos4` (ultimos 4 digitos), enmascarado ya en el cliente y revalidado server-side (`lib/auth/registro.ts`) para rechazar cualquier valor que no sean EXACTAMENTE 4 digitos. El SSN completo NUNCA viaja al servidor ni se guarda en ningun lado — necesario porque esta demo se despliega publicamente en internet (Vercel) sin autenticacion real de servidor. | Un dato real de SSN completo en produccion requeriria cifrado en reposo, control de acceso estricto (least privilege) y cumplimiento normativo (ej. cifrado a nivel de campo, tokenizacion via un proveedor especializado, auditoria de acceso); aqui se opta por minimizar el dato desde el origen en vez de resolver ese cumplimiento en la demo. |
 
@@ -294,10 +295,89 @@ disponible en toda la app, con entrada/salida por texto o por voz.
   /jornada/*              TOTP + bloqueo facial  [rrhh-personal-pos, etapa 2]
   /chatbot/*              reglas + voz del chat  [shell de UI, etapa 3]
   /hardware/*             stubs de perifericos   [hardware-perifericos-pos, fase 3]
+  /offline/*              F1-T3: IndexedDB (catalogoCache/colaEscritura), cola de
+                          escritura + drenado, uuidv7(), hook de estado de sync
+                          para la UI                [frontend-mostrador-kiosco-pos]
 /components/shell/ChatbotWidget.tsx  widget flotante de chat [shell de UI, etapa 3]
 /public/cropped-Logo.webp logo real de marca
+/public/sw.js             F1-T3: Service Worker (cache del app shell del terminal
+                          de cajero; NO cachea /api/**, ver comentario de cabecera)
+                                                     [frontend-mostrador-kiosco-pos]
 ```
 
 Reglas: dinero en **centavos enteros**; nombres del modelo en espanol (C-NOMBRES);
 `backend-ventas` es el **unico** que calcula total/impuesto/saldo; `nomina-pos` es el
 **unico** que calcula pago/retencion de personal.
+
+### F1-T3 — Terminal de cajero offline-first (Service Worker + IndexedDB)
+
+Resiliencia agregada de forma incremental sobre el terminal existente
+(`app/pos/*`, `components/pos/*`), sin rediseño visual:
+
+- **Service Worker** (`public/sw.js`, registrado desde `lib/offline/registrarServiceWorker.ts`,
+  llamado por el hook `lib/offline/useEstadoSync.ts` que ya montan `app/pos/page.tsx` y
+  `app/pos/nuevo/page.tsx`): cachea el app shell (paginas, bundles JS/CSS con hash,
+  imagenes) con estrategia cache-primero + revalidacion en segundo plano.
+  Deliberadamente **NO** intercepta `/api/**` (incluido el catalogo): esa cache vive en
+  IndexedDB con mas control (ver siguiente punto) — una sola fuente de verdad para el
+  catalogo offline, en vez de dos caches independientes que podrian desincronizarse.
+- **IndexedDB** (`lib/offline/db.ts`, API nativa, sin dependencias nuevas — cae a un
+  almacen en memoria fuera del navegador, lo que ademas hace testeable la logica sin un
+  shim de IndexedDB): almacen `catalogoCache` (ultimo `/api/v1/catalogo` bueno + timestamp,
+  usado como fallback por `components/pos/api.ts` `obtenerCatalogo()` cuando la red
+  falla) y almacen `colaEscritura` (`{ id uuid v7, metodo, url, cuerpo, creadoEn, intentos }`).
+- **Cola de escritura** (`lib/offline/queue.ts`): `components/pos/api.ts` encola
+  automaticamente cualquier escritura (POST/PATCH/DELETE — agregar linea, actualizar
+  linea, descuento, enviar a cocina, registrar pago) que falle por error de red, en vez
+  de perderla; el cajero ve un error distinguible ("ENCOLADO_SIN_CONEXION" /
+  `api.encoladoSinConexion`) y un indicador sutil "sin conexion, N pendientes de
+  sincronizar" (mismo badge dorado que ya existia para `pos.sinConexion`, ahora
+  alimentado por `useEstadoSync()`), pero puede seguir operando otros pedidos: la
+  escritura no se pierde.
+- **Drenado automatico** (`lib/offline/autoDrenado.ts`): al evento `online` (con un
+  temporizador periodico de respaldo, ya que `online` no es 100% confiable) reproduce la
+  cola **en el orden original** (el propio id uuid v7 es ordenable por tiempo) contra la
+  API real; cada entrada se retira SOLO tras una respuesta 2xx real; un **409** se trata
+  como "ya aplicado" (se retira sin reintentar y sin duplicar); cualquier otro fallo
+  DETIENE el drenado en esa entrada (no se salta la siguiente, para no romper el orden
+  causal, ej. una linea depende de que el pedido ya exista) y se reintenta en el proximo
+  ciclo.
+- **UUID v7 del lado cliente** (`lib/offline/uuidv7.ts`, RFC 9562, monotonic dentro del
+  proceso, sin dependencias nuevas): usado hoy para (a) el id de cada entrada de
+  `colaEscritura`, y (b) una `idempotencyKey` que `crearPedido()`/`registrarPago()` en
+  `components/pos/api.ts` ya envian (body + header `Idempotency-Key`) en cada creacion de
+  pedido/pago.
+
+**Limitacion conocida (deviacion documentada):** `Pedido.id`/`Pago.id` los sigue
+asignando el SERVIDOR (`lib/db/store.ts` `uid()`, todavia v4) — las rutas actuales de
+`app/api/v1/pedidos` y `/pagos` no leen ningun id que mande el cliente, solo la
+`idempotencyKey` nueva (que hoy se ignora). Por eso la cola offline resuelve muy bien el
+caso de mayor valor (un corte de LAN A MITAD de un turno, con el pedido ya creado en el
+servidor mientras habia red: agregar lineas, descuento, enviar a cocina y cobrar siguen
+funcionando y se sincronizan solos), pero **no** cubre iniciar un pedido enteramente
+nuevo con cero conectividad desde el primer instante (no hay todavia un mecanismo de
+reconciliacion de un id temporal de pedido generado en el cliente contra el id real que
+asigne el servidor al reconectar). Cerrar ese caso requiere que el Store Server (F1-T1,
+tarea paralela en `store-server/`) acepte/honre ids v7 generados por el cliente de forma
+idempotente (F1-T5) — fuera del alcance de F1-T3 tal como esta delimitado en
+`PLAN_DE_PRODUCCION.md`.
+
+**Pruebas** (`npm test`, Vitest — ver "Runner de pruebas" mas abajo):
+`lib/offline/__tests__/uuidv7.test.ts` (formato/version/variante v7, unicidad en rafaga,
+orden por tiempo) y `lib/offline/__tests__/queue.test.ts` (encolar tras fetch fallido,
+drenado en orden, un fallo detiene el drenado sin saltar escrituras, 409 tratado como
+ya-aplicado sin duplicar), mas `components/pos/__tests__/api.test.ts` (integracion real
+contra `components/pos/api.ts`: agregarLinea/registrarPago encolan al fallar la red,
+lecturas GET nunca se encolan, y `obtenerCatalogo()` cae al cache de IndexedDB sin red).
+
+### Runner de pruebas (nuevo)
+
+El repo no tenia un test runner configurado. Se agrego **Vitest** (`npm test` /
+`npm run test:watch`, config en `vitest.config.ts`) por integrar con Next.js 14 +
+TypeScript sin configuracion adicional. `lib/sales/__tests__/**` y
+`lib/kitchen/kds.test.ts` (de otros duenos: `backend-ventas-pos` / `kds-cocina-pos`) usan
+`node:test`, no Vitest, y quedan excluidos del `include` de Vitest a proposito: mezclarlos
+hace que Vitest reporte un falso "No test suite found" en esos archivos aunque sus
+aserciones si corran (confirmado corriendo `npx vitest run` antes de excluirlos). Si esos
+modulos migran a Vitest en su propia tarea, la exclusion se puede quitar sin tocar nada de
+F1-T3.
