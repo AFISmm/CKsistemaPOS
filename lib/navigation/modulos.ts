@@ -123,6 +123,10 @@ export const MODULOS_NAVEGACION: ModuloNavegacion[] = [
     subitems: [
       { href: "/empleados", labelKey: "sidebar.personal.empleados", permiso: "empleados.gestionar" },
       { href: "/nomina", labelKey: "sidebar.nomina", permiso: "nomina.ver" },
+      // AGREGADO (Fase B, revision 2026-07-22 seccion "reparto de propinas por
+      // rol/puntos"): mismo permiso que Nomina ("nomina.ver") — es informacion
+      // gerencial/financiera de referencia del mismo tipo, ver app/propinas.
+      { href: "/propinas", labelKey: "sidebar.propinas", permiso: "nomina.ver" },
     ],
   },
   { href: "/menu", labelKey: "sidebar.menu", permiso: "menu.gestionar" },

@@ -48,6 +48,37 @@ export type EstadoPago =
 
 export type TipoModificador = "agregar" | "sin" | "sustituir";
 
+/**
+ * AGREGADO (Fase B, 2026-07-22, ver docs/analisis-revision-20260722-modulos-innovacion-seguridad.md
+ * seccion 2.3 / Anexo A.1 y docs/requisitos.md S-16): clasificacion de
+ * PRESENTACION/AGRUPACION de un `Modificador`, para que la UI de toma de
+ * pedido pueda agrupar visualmente las opciones de forma sensata (toppings
+ * vs. salsas/aderezos vs. sustituciones), independiente de `TipoModificador`
+ * (que es la clasificacion de MECANICA: como afecta precio/receta).
+ *  - "topping": extra tipo topping (viene de la hoja/categoria real "Toppings").
+ *  - "salsa": salsa o aderezo (hojas/categorias reales "Sauces" / "Dressings").
+ *  - "sustitucion": intercambio que afecta inventario de forma relevante
+ *    (siempre que `tipo === "sustituir"`).
+ *  - "otro": cualquier otro caso (ej. "sin X" que quita un insumo, tallas,
+ *    extras genericos de la hoja "Modifiers").
+ * DEMO: ver heuristica de poblacion en lib/data/catalog-modificadores.demo.ts.
+ */
+export type CategoriaModificador = "topping" | "salsa" | "sustitucion" | "otro";
+
+/**
+ * AGREGADO (Fase B, 2026-07-22, ver docs/requisitos.md S-16): catalogo DEMO de
+ * alergenos comunes usado para etiquetar `Insumo.alergenos`. Lista basica tipo
+ * FDA "Big 9" simplificada a los alergenos relevantes para insumos de cocina
+ * QSR observados en el recetario real (no es una lista regulatoria completa).
+ */
+export type TipoAlergeno =
+  | "lacteos"
+  | "gluten"
+  | "huevo"
+  | "soya"
+  | "frutosSecos"
+  | "mariscos";
+
 export type EstadoTurno = "abierto" | "cerrado";
 
 /**
@@ -376,6 +407,27 @@ export interface Modificador {
   precioDelta: number;
   disponible86: boolean;
   tipo: TipoModificador;
+  /**
+   * AGREGADO (Fase B, 2026-07-22): clasificacion de PRESENTACION/AGRUPACION
+   * (ver `CategoriaModificador`). OPCIONAL a proposito (mismo criterio que
+   * otros campos agregados de este contrato, ej. `Pedido.paraLlevar`): asi
+   * fixtures existentes de otras tareas que construyen un `Modificador` a
+   * mano (ej. lib/sales/__tests__/totales.test.ts, fuera del alcance
+   * editable de esta tarea) siguen compilando sin declarar este campo nuevo.
+   * `undefined` se trata como "otro" en el codigo que lo consume.
+   */
+  categoria?: CategoriaModificador;
+  /**
+   * AGREGADO (Fase B, 2026-07-22, ver docs/requisitos.md S-16): id del
+   * `Insumo` que este modificador agrega/quita/sustituye en la receta del
+   * producto (ej. un modificador "sin Queso" apunta al Insumo "Queso"). Se
+   * usa para poder OMITIR automaticamente el alergeno de ese insumo en la
+   * comanda cuando `tipo === "sin"` y el cliente selecciona ese modificador
+   * (ver lib/menu/alergenos.ts). OPCIONAL: la mayoria de modificadores
+   * "agregar" de sabor/tamano no necesitan este dato; `null`/`undefined` =
+   * no aplica o no se pudo mapear a un insumo especifico del catalogo real.
+   */
+  insumoAfectadoId?: string | null;
 }
 
 export interface Insumo {
@@ -383,6 +435,52 @@ export interface Insumo {
   nombre: string;
   unidadMedida: string;
   umbralStockBajo: number;
+  /**
+   * AGREGADO (Fase B, 2026-07-22, ver docs/analisis-revision-20260722-modulos-innovacion-seguridad.md
+   * Anexo A.2): ESTIMADO DEMO de costo unitario en CENTAVOS enteros
+   * (C-DINERO), en la misma `unidadMedida` del insumo. El import real de
+   * Recetario_Simplificado.xlsx (scripts/importar-recetario.js) EXCLUYE
+   * deliberadamente la columna "Costo ($)" del archivo fuente porque se
+   * verifico que no es confiable (ej. "SALT IODIZED GRANULAR" usada 185
+   * veces implica costo-por-onza entre $0.019 y $3.58 segun la receta,
+   * ~180x de varianza — ver Anexo). Este campo NO viene de esa columna: es
+   * una estimacion razonable tipo mayoreo US para el TIPO de insumo (ver
+   * lib/data/catalog-insumos-costos.demo.ts), poblada como DEMO explicita
+   * pendiente de validar contra facturas reales de Chicken Kitchen.
+   * OPCIONAL: `undefined` = sin estimar (no deberia ocurrir para los 84
+   * insumos reales sembrados, ver reporte de la tarea; catalogos/fixtures
+   * antiguos sin este campo siguen compilando).
+   */
+  costoUnitarioCentavos?: number;
+  /**
+   * AGREGADO (Fase B, 2026-07-22, ver docs/requisitos.md S-16): alergenos
+   * DEMO de este insumo, detectados por una HEURISTICA DE PALABRAS CLAVE
+   * sobre `nombre` (ver lib/data/catalog-insumos-alergenos.demo.ts) — NO son
+   * datos reales verificados de Chicken Kitchen ni de un nutriologo. Antes
+   * de un lanzamiento real, operaciones debe confirmar/corregir esta lista
+   * (ver S-16 en docs/requisitos.md). OPCIONAL: `undefined`/`[]` = sin
+   * alergenos detectados por la heuristica (no necesariamente "sin alergenos
+   * reales").
+   */
+  alergenos?: TipoAlergeno[];
+  /**
+   * AGREGADO (Fase B, 2026-07-22, ver docs/analisis-revision-20260722-modulos-innovacion-seguridad.md
+   * Anexo A.3 y docs/requisitos.md S-14): si este Insumo es en realidad un
+   * PRODUCTO ELABORADO/INTERMEDIO preparado en tienda a partir de otros
+   * insumos (ej. una salsa hecha en casa), este campo apunta al `Receta.id`
+   * que define SUS insumos base (tipicamente la misma Receta ya asociada al
+   * Producto vendible equivalente de ese insumo, si existe uno — ver
+   * lib/data/catalog-real.ts). null/undefined = insumo comprado tal cual, SIN
+   * receta propia (comportamiento por defecto y actual de los 84 insumos
+   * reales importados). Consumido recursivamente por
+   * lib/inventory/bom.ts (`explotarAInsumosBase`) tanto para el descuento de
+   * stock (lib/inventory/inventario.ts) como para el costeo
+   * (lib/menu/costeo.ts), para que un producto que use este insumo cascade
+   * correctamente 2 niveles (ver Anexo A.3 para el UNICO ejemplo demo
+   * poblado). S-14 sigue abierto: pendiente confirmar con operaciones que
+   * salsas reales se preparan en tienda vs. se compran ya hechas.
+   */
+  recetaBaseId?: string | null;
 }
 
 export interface Receta {
@@ -574,6 +672,24 @@ export interface Rol {
   id: string;
   nombre: string;
   permisos: string[];
+  /**
+   * AGREGADO (Fase B, revision 2026-07-22 seccion "reparto de propinas por
+   * rol/puntos" — herramienta OPERATIVA, no contable, ver
+   * docs/analisis-revision-20260722-modulos-innovacion-seguridad.md): % entero
+   * (0-100) de la propina EN EFECTIVO de un turno de caja que le corresponde a
+   * este rol, usado por `lib/propinas/reparto.ts` para calcular el reparto de
+   * referencia por empleado presente en el turno (ver app/propinas). `[SUPUESTO]`
+   * — son valores DEMO de arranque (ver seed en lib/db/store.ts), PENDIENTES de
+   * confirmacion real de negocio; un gerente puede editarlos en /propinas.
+   * `undefined`/`null` se trata como 0 (rol sin participacion en el reparto de
+   * propinas, ej. gerente/developer) en toda la logica de calculo, NUNCA lanza.
+   * Puntos vs. porcentaje son equivalentes (un sistema de puntos es solo un
+   * porcentaje sin normalizar); se eligio porcentaje por ser mas simple de
+   * mostrar/editar en la UI de un gerente. OPCIONAL a proposito: asi los
+   * fixtures `Rol` de pruebas/otras tareas que construyen el objeto a mano
+   * siguen compilando sin declarar este campo nuevo.
+   */
+  porcentajePropinaDemo?: number | null;
 }
 
 export interface Usuario {

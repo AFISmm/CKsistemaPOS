@@ -113,6 +113,9 @@ export default function ReporteDeHorasPage() {
             <Link href="/empleados" className="text-sm text-ck-red underline dark:text-red-400">
               {t("nomina.irAEmpleados")}
             </Link>
+            <Link href="/propinas" className="text-sm text-ck-red underline dark:text-red-400">
+              {t("nomina.irAPropinas")}
+            </Link>
           </div>
         </div>
 

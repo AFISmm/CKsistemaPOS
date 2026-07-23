@@ -75,10 +75,15 @@ export type UsuarioSinPin = Omit<Usuario, "pinHash">;
  */
 export type UsuarioConPinDemo = UsuarioSinPin & { pinActualDemo: string };
 
+/**
+ * Ademas de `usuario`/`rol`, la respuesta trae un `token` de sesion FIRMADO
+ * (ver lib/auth/sesionToken.ts) — es lo que `SesionProvider.tsx` guarda en
+ * localStorage a partir de Fase B/seguridad (ya NO el `usuarioId` en crudo).
+ */
 export async function iniciarSesionPin(
   email: string,
   pin: string
-): Promise<{ usuario: UsuarioSinPin; rol: Rol }> {
+): Promise<{ usuario: UsuarioSinPin; rol: Rol; token: string }> {
   return solicitar("/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, pin }),
@@ -119,10 +124,18 @@ export async function registrarEmpleado(input: RegistroInput): Promise<Empleado>
   return empleado;
 }
 
+/**
+ * Resuelve usuario+rol para el `token` de sesion guardado, verificandolo
+ * server-side (ver GET /api/v1/auth/sesion y lib/auth/sesionToken.ts). Ya NO
+ * recibe un `usuarioId` de query string (Fase B/seguridad, revision
+ * 2026-07-22): manda el token como header `Authorization: Bearer <token>`.
+ */
 export async function obtenerSesionActual(
-  usuarioId: string
+  token: string
 ): Promise<{ usuario: UsuarioSinPin; rol: Rol }> {
-  return solicitar(`/auth/sesion?usuarioId=${encodeURIComponent(usuarioId)}`);
+  return solicitar("/auth/sesion", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
 }
 
 export async function listarNotificaciones(): Promise<Notificacion[]> {

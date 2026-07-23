@@ -20,7 +20,9 @@
  */
 
 import { getDb, uid } from "../db/store";
-import type { Insumo, Receta, RecetaInsumo } from "../domain/types";
+import type { Insumo, Receta, RecetaInsumo, TipoAlergeno } from "../domain/types";
+import { alergenosDeProducto } from "./alergenos";
+import { calcularCostoRecetaProducto } from "./costeo";
 import { ErrorMenu } from "./errores";
 
 export interface ItemRecetaInput {
@@ -39,6 +41,23 @@ export interface RecetaDeProducto {
   /** null = el producto no tiene receta definida todavia (ok, ver Receta en lib/domain/types.ts). */
   receta: Receta | null;
   items: RecetaInsumoConNombre[];
+  /**
+   * AGREGADO (Fase B, 2026-07-22): costo ESTIMADO DEMO de estos insumos a
+   * estas cantidades (ver lib/menu/costeo.ts para el aviso de escala — NO es
+   * un costo por porcion listo para comparar contra `Producto.precioBase`).
+   * `null` = sin receta, o sin ningun insumo con `costoUnitarioCentavos`
+   * poblado.
+   */
+  costoEstimadoCentavos: number | null;
+  /** true si algun insumo (propio o de un BOM anidado) no tiene costo DEMO poblado — el numero de arriba es parcial. */
+  costoIncompleto: boolean;
+  /**
+   * AGREGADO (Fase B, 2026-07-22, ver docs/requisitos.md S-16): alergenos
+   * DEMO detectados para este producto (heuristica de nombre de insumo, ver
+   * lib/data/catalog-insumos-alergenos.demo.ts) — NO son datos reales
+   * verificados.
+   */
+  alergenos: TipoAlergeno[];
 }
 
 function validarProducto(productoId: string): void {
@@ -65,14 +84,23 @@ export function obtenerRecetaProducto(productoId: string): RecetaDeProducto {
 
   const receta = db.recetas.find((r) => r.productoId === productoId && r.activo) ?? null;
   if (!receta) {
-    return { productoId, receta: null, items: [] };
+    return { productoId, receta: null, items: [], costoEstimadoCentavos: null, costoIncompleto: false, alergenos: [] };
   }
 
   const items = db.recetaInsumos
     .filter((ri) => ri.recetaId === receta.id)
     .map((ri) => conNombreInsumo(ri, insumosPorId));
 
-  return { productoId, receta, items };
+  const costo = calcularCostoRecetaProducto(productoId);
+
+  return {
+    productoId,
+    receta,
+    items,
+    costoEstimadoCentavos: costo?.costoCentavos ?? null,
+    costoIncompleto: costo?.costoIncompleto ?? false,
+    alergenos: alergenosDeProducto(productoId),
+  };
 }
 
 /** Lista todos los insumos del catalogo (para el selector de ingredientes en la UI de edicion). */

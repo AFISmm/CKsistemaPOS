@@ -1,9 +1,33 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { GrupoModificador, Modificador, Producto } from "@/lib/domain/types";
+import type { CategoriaModificador, GrupoModificador, Modificador, Producto } from "@/lib/domain/types";
 import { formatearDinero } from "@/lib/domain/types";
 import { useI18n } from "@/lib/shell/I18nProvider";
+
+/**
+ * AGREGADO (Fase B, 2026-07-22, ver docs/analisis-revision-20260722-modulos-innovacion-seguridad.md
+ * seccion 2.3 / Anexo A.1): orden de presentacion cuando un mismo
+ * GrupoModificador mezcla mas de una `CategoriaModificador` — mantiene
+ * salsas/toppings/sustituciones agrupados visualmente en vez de intercalados.
+ * `undefined` (modificadores sin `categoria`, ej. datos de otras tareas/tests)
+ * se trata igual que "otro".
+ */
+const ORDEN_CATEGORIAS: CategoriaModificador[] = ["salsa", "topping", "sustitucion", "otro"];
+
+function agruparPorCategoria(opciones: Modificador[]): Array<{ categoria: CategoriaModificador; items: Modificador[] }> {
+  const porCategoria = new Map<CategoriaModificador, Modificador[]>();
+  for (const mod of opciones) {
+    const categoria = mod.categoria ?? "otro";
+    const lista = porCategoria.get(categoria) ?? [];
+    lista.push(mod);
+    porCategoria.set(categoria, lista);
+  }
+  return ORDEN_CATEGORIAS.filter((c) => porCategoria.has(c)).map((categoria) => ({
+    categoria,
+    items: porCategoria.get(categoria)!,
+  }));
+}
 
 interface Props {
   producto: Producto;
@@ -133,35 +157,48 @@ export default function ModificadorModal({
                     {cuenta}/{grupo.maxSelecciones}
                   </span>
                 </div>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {opciones.map((mod) => {
-                    const elegido = seleccion[grupo.id]?.includes(mod.id) ?? false;
-                    const agotado = mod.disponible86 === false;
-                    return (
-                      <button
-                        key={mod.id}
-                        type="button"
-                        disabled={agotado}
-                        onClick={() => alternarSeleccion(grupo, mod.id)}
-                        className={`min-h-[52px] rounded-lg border px-3 py-2 text-sm font-medium transition active:scale-95 ${
-                          agotado
-                            ? "cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-500 line-through dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-500"
-                            : elegido
-                            ? "border-ck-red bg-ck-red text-white"
-                            : "border-neutral-200 bg-white text-ck-dark hover:border-ck-red dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
-                        }`}
-                      >
-                        {mod.nombre}
-                        {mod.precioDelta !== 0 && (
-                          <span className="block text-xs opacity-80">
-                            {mod.precioDelta > 0 ? "+" : ""}
-                            {formatearDinero(mod.precioDelta)}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+                {(() => {
+                  const subgrupos = agruparPorCategoria(opciones);
+                  const mostrarEncabezadoCategoria = subgrupos.length > 1;
+                  return subgrupos.map(({ categoria, items }) => (
+                    <div key={categoria} className="mb-2 last:mb-0">
+                      {mostrarEncabezadoCategoria && (
+                        <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+                          {t(`pos.modificador.categoria.${categoria}`)}
+                        </p>
+                      )}
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        {items.map((mod) => {
+                          const elegido = seleccion[grupo.id]?.includes(mod.id) ?? false;
+                          const agotado = mod.disponible86 === false;
+                          return (
+                            <button
+                              key={mod.id}
+                              type="button"
+                              disabled={agotado}
+                              onClick={() => alternarSeleccion(grupo, mod.id)}
+                              className={`min-h-[52px] rounded-lg border px-3 py-2 text-sm font-medium transition active:scale-95 ${
+                                agotado
+                                  ? "cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-500 line-through dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-500"
+                                  : elegido
+                                  ? "border-ck-red bg-ck-red text-white"
+                                  : "border-neutral-200 bg-white text-ck-dark hover:border-ck-red dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+                              }`}
+                            >
+                              {mod.nombre}
+                              {mod.precioDelta !== 0 && (
+                                <span className="block text-xs opacity-80">
+                                  {mod.precioDelta > 0 ? "+" : ""}
+                                  {formatearDinero(mod.precioDelta)}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ));
+                })()}
               </div>
             );
           })}

@@ -8,6 +8,7 @@
 
 import type { Empleado, HorarioTurno, Marcaje, Rol, Ubicacion } from "@/lib/domain/types";
 import type { IntervaloTrabajado } from "@/lib/rrhh/asistencia";
+import { headerAutorizacionSesion } from "@/lib/shell/tokenSesionCliente";
 
 const BASE_URL = "/api/v1";
 
@@ -164,9 +165,17 @@ export async function completarOnboarding(id: string, pin: string): Promise<Empl
   return empleado;
 }
 
+/**
+ * AGREGADO (Fase B/seguridad, revision 2026-07-22): esta ruta ahora exige
+ * sesion valida server-side (ver app/api/v1/empleados/[id]/baja/route.ts y
+ * lib/auth/sesionToken.ts) — se adjunta el token guardado como header
+ * `Authorization`. Ya no hace falta (ni se manda) `usuarioId` en el body: el
+ * servidor usa el `usuarioId` del token verificado como quien dio de baja.
+ */
 export async function darDeBajaEmpleado(id: string, motivo: string): Promise<Empleado> {
   const { empleado } = await solicitar<{ empleado: Empleado }>(`/empleados/${id}/baja`, {
     method: "POST",
+    headers: headerAutorizacionSesion(),
     body: JSON.stringify({ motivo }),
   });
   return empleado;

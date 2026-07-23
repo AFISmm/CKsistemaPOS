@@ -247,21 +247,43 @@ function sembrar(db: Db): void {
     "menu.gestionar",
   ];
 
+  // % DEMO de reparto de propinas por rol (Fase B, revision 2026-07-22
+  // seccion "reparto de propinas por rol/puntos" — ver Rol.porcentajePropinaDemo
+  // en lib/domain/types.ts y lib/propinas/reparto.ts): `[SUPUESTO]`, valores
+  // de arranque PENDIENTES de confirmacion real de negocio, editables por un
+  // gerente en /propinas. Suman 100 entre los roles que SI participan:
+  //  - cajero (60%): rol de mostrador, contacto directo con el cliente que
+  //    cobra y suele recibir la propina en efectivo primero.
+  //  - cocina (40%): la propina de mostrador se considera un pozo comun del
+  //    turno (no "propina de mesa" de un mesero especifico), asi que cocina
+  //    participa igual que en un reparto por puntos clasico de QSR.
+  //  - gerenteTienda/developer (0%): en EE.UU. las reglas de "tip pooling"
+  //    de la FLSA (Fair Labor Standards Act) tipicamente EXCLUYEN a gerentes/
+  //    supervisores de los fondos de propina de sus empleados; se modela ese
+  //    supuesto por defecto (0%) aunque sigue siendo editable en la UI si la
+  //    tienda decide lo contrario.
+  const PORCENTAJE_PROPINA_DEMO_CAJERO = 60;
+  const PORCENTAJE_PROPINA_DEMO_COCINA = 40;
+  const PORCENTAJE_PROPINA_DEMO_GERENCIAL = 0;
+
   db.roles.push(
     {
       id: "rol-cajero",
       nombre: "cajero",
       permisos: ["pedido.crear", "pedido.cobrar", "producto.marcar86"],
+      porcentajePropinaDemo: PORCENTAJE_PROPINA_DEMO_CAJERO,
     },
     {
       id: "rol-cocina",
       nombre: "cocina",
       permisos: ["cocina.actualizarEstado"],
+      porcentajePropinaDemo: PORCENTAJE_PROPINA_DEMO_COCINA,
     },
     {
       id: "rol-gerente",
       nombre: "gerenteTienda",
       permisos: PERMISOS_GERENCIALES,
+      porcentajePropinaDemo: PORCENTAJE_PROPINA_DEMO_GERENCIAL,
     },
     {
       // Cuenta de desarrolladores/staff de Digenius (correos @digeniusai.com,
@@ -276,6 +298,9 @@ function sembrar(db: Db): void {
       id: ROL_DEVELOPER_ID,
       nombre: "developer",
       permisos: PERMISOS_GERENCIALES,
+      // Cuenta de administracion del sistema, no personal de tienda: no
+      // participa en el reparto de propinas (mismo criterio que gerencial).
+      porcentajePropinaDemo: PORCENTAJE_PROPINA_DEMO_GERENCIAL,
     }
   );
 

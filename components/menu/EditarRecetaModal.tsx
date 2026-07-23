@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import type { Insumo, Producto } from "@/lib/domain/types";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { Insumo, Producto, TipoAlergeno } from "@/lib/domain/types";
+import { formatearDinero } from "@/lib/domain/types";
 import {
   guardarRecetaProducto,
   listarInsumos,
@@ -46,6 +47,22 @@ export default function EditarRecetaModal({
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // AGREGADO (Fase B, 2026-07-22): costo/alergenos DEMO de la receta GUARDADA
+  // actualmente (calculados server-side, ver lib/menu/costeo.ts / alergenos.ts
+  // — ya atraviesan el BOM multi-nivel si aplica). Se refrescan al cargar y
+  // al guardar.
+  const [costoEstimadoCentavos, setCostoEstimadoCentavos] = useState<number | null>(null);
+  const [costoIncompleto, setCostoIncompleto] = useState(false);
+  const [alergenosGuardados, setAlergenosGuardados] = useState<TipoAlergeno[]>([]);
+
+  // AGREGADO (Fase B, 2026-07-22): simulador "sin X" 100% cliente (no importa
+  // lib/menu/lib/db, ver regla dura de este archivo/components/pos/api.ts) —
+  // vista previa SIMPLIFICADA: union de `Insumo.alergenos` de las filas
+  // actuales del formulario (SIN atravesar insumos compuestos/BOM, a
+  // diferencia del calculo server-side de arriba). Demuestra la idea de S-16
+  // ("sin X" ya no aporta el alergeno de ese insumo) de forma interactiva.
+  const [insumosQuitadosSimulacion, setInsumosQuitadosSimulacion] = useState<Set<string>>(new Set());
+
   const cargar = useCallback(async () => {
     setCargando(true);
     setError(null);
@@ -62,12 +79,36 @@ export default function EditarRecetaModal({
           cantidad: String(item.cantidad),
         }))
       );
+      setCostoEstimadoCentavos(recetaActual.costoEstimadoCentavos);
+      setCostoIncompleto(recetaActual.costoIncompleto);
+      setAlergenosGuardados(recetaActual.alergenos);
+      setInsumosQuitadosSimulacion(new Set());
     } catch (err) {
       setError(textoErrorApi(err, t, "menu.receta.errorCarga"));
     } finally {
       setCargando(false);
     }
   }, [producto.id, t]);
+
+  /** Vista previa SIMPLIFICADA (sin BOM) de alergenos si se "quitan" (simulacion) los insumos marcados. */
+  const alergenosPreviaSimulacion = useMemo(() => {
+    const encontrados = new Set<TipoAlergeno>();
+    for (const fila of filas) {
+      if (insumosQuitadosSimulacion.has(fila.insumoId)) continue;
+      const insumo = insumosCatalogo.find((i) => i.id === fila.insumoId);
+      for (const a of insumo?.alergenos ?? []) encontrados.add(a);
+    }
+    return Array.from(encontrados);
+  }, [filas, insumosQuitadosSimulacion, insumosCatalogo]);
+
+  function alternarQuitadoSimulacion(insumoId: string) {
+    setInsumosQuitadosSimulacion((prev) => {
+      const nuevo = new Set(prev);
+      if (nuevo.has(insumoId)) nuevo.delete(insumoId);
+      else nuevo.add(insumoId);
+      return nuevo;
+    });
+  }
 
   useEffect(() => {
     cargar();
@@ -119,7 +160,10 @@ export default function EditarRecetaModal({
 
     setGuardando(true);
     try {
-      await guardarRecetaProducto(producto.id, items);
+      const actualizado = await guardarRecetaProducto(producto.id, items);
+      setCostoEstimadoCentavos(actualizado.costoEstimadoCentavos);
+      setCostoIncompleto(actualizado.costoIncompleto);
+      setAlergenosGuardados(actualizado.alergenos);
       onGuardado();
     } catch (err) {
       setError(textoErrorApi(err, t, "menu.receta.errorNoPudoGuardar"));
@@ -146,6 +190,57 @@ export default function EditarRecetaModal({
           <p className="text-sm text-neutral-600 dark:text-neutral-400">{t("menu.receta.cargando")}</p>
         ) : (
           <form onSubmit={manejarSubmit} className="space-y-3">
+            <div className="rounded-xl border border-dashed border-neutral-300 p-3 text-xs dark:border-neutral-700">
+              <p className="font-semibold text-ck-dark dark:text-neutral-100">
+                {t("menu.receta.costoTitulo")}:{" "}
+                <span className="font-normal">
+                  {costoEstimadoCentavos == null ? t("menu.receta.sinCosto") : formatearDinero(costoEstimadoCentavos)}
+                  {costoIncompleto && costoEstimadoCentavos != null ? ` (${t("menu.receta.costoIncompleto")})` : ""}
+                </span>
+              </p>
+              <p className="mt-0.5 text-neutral-500 dark:text-neutral-400">{t("menu.receta.costoAviso")}</p>
+
+              <p className="mt-2 font-semibold text-ck-dark dark:text-neutral-100">{t("menu.receta.alergenosTitulo")}</p>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {alergenosGuardados.length === 0 ? (
+                  <span className="text-neutral-500 dark:text-neutral-400">{t("menu.receta.sinAlergenos")}</span>
+                ) : (
+                  alergenosGuardados.map((a) => (
+                    <span
+                      key={a}
+                      className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                    >
+                      {t(`menu.alergeno.${a}`)}
+                    </span>
+                  ))
+                )}
+              </div>
+              <p className="mt-1 text-neutral-500 dark:text-neutral-400">{t("menu.receta.alergenosAviso")}</p>
+
+              {filas.length > 0 && (
+                <>
+                  <p className="mt-2 font-semibold text-ck-dark dark:text-neutral-100">
+                    {t("menu.receta.simularQuitarTitulo")}
+                  </p>
+                  <p className="text-neutral-500 dark:text-neutral-400">{t("menu.receta.simularQuitarAviso")}</p>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {alergenosPreviaSimulacion.length === 0 ? (
+                      <span className="text-neutral-500 dark:text-neutral-400">{t("menu.receta.sinAlergenos")}</span>
+                    ) : (
+                      alergenosPreviaSimulacion.map((a) => (
+                        <span
+                          key={a}
+                          className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                        >
+                          {t(`menu.alergeno.${a}`)}
+                        </span>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
             {insumosCatalogo.length === 0 ? (
               <p className="text-sm text-neutral-600 dark:text-neutral-400">
                 {t("menu.receta.sinInsumosCatalogo")}
@@ -180,6 +275,17 @@ export default function EditarRecetaModal({
                     <span className="w-14 shrink-0 text-xs text-neutral-500 dark:text-neutral-400">
                       {unidadDe(fila.insumoId)}
                     </span>
+                    <label
+                      className="flex shrink-0 items-center gap-1 text-[10px] text-neutral-500 dark:text-neutral-400"
+                      title={t("menu.receta.simularQuitarAviso")}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={insumosQuitadosSimulacion.has(fila.insumoId)}
+                        onChange={() => alternarQuitadoSimulacion(fila.insumoId)}
+                      />
+                      {t("menu.receta.simularQuitar")}
+                    </label>
                     <button
                       type="button"
                       onClick={() => quitarFila(fila.key)}

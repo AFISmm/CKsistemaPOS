@@ -9,6 +9,7 @@
 
 import type { Pedido } from "../domain/types";
 import { UBICACION_PILOTO_ID, ahora, getDb, registrarEvento } from "../db/store";
+import { agregarCantidades, explotarAInsumosBase, indexarRecetaInsumosPorReceta } from "./bom";
 
 export interface InsumoBajoUmbral {
   insumoId: string;
@@ -21,6 +22,18 @@ export interface InsumoBajoUmbral {
  * Aplica un delta (positivo o negativo) de insumos a la ubicacion del pedido segun
  * la receta activa de cada producto vendido. signo = -1 para descontar (venta),
  * +1 para revertir (reembolso/anulacion).
+ *
+ * AGREGADO (Fase B, 2026-07-22, ver docs/analisis-revision-20260722-modulos-innovacion-seguridad.md
+ * Anexo A.3 / S-14): antes de mover stock, cada `RecetaInsumo.insumoId` se
+ * EXPLOTA recursivamente via `explotarAInsumosBase` (lib/inventory/bom.ts). Si
+ * el insumo es "plano" (comportamiento actual de los 84 insumos reales, sin
+ * `recetaBaseId`), la explosion es un no-op (devuelve el mismo insumoId/cantidad
+ * de siempre). Si el insumo es un PRODUCTO ELABORADO (`recetaBaseId` poblado —
+ * hoy solo 1 ejemplo demo, ver lib/data/catalog-real.ts), el movimiento de
+ * stock se aplica a SUS insumos base en cascada, en vez de al insumo elaborado
+ * (que no lleva Stock propio: es un nodo virtual/calculado del BOM, no algo
+ * que se compre y cuente en inventario). Esto es lo que hace que vender un
+ * plato que use ese insumo elaborado descuente CORRECTAMENTE 2 niveles.
  */
 function moverStockPorPedido(
   pedido: Pedido,
@@ -29,6 +42,8 @@ function moverStockPorPedido(
   motivo: string
 ): void {
   const db = getDb();
+  const insumosPorId = new Map(db.insumos.map((i) => [i.id, i]));
+  const recetaInsumosPorRecetaId = indexarRecetaInsumosPorReceta(db.recetaInsumos);
 
   for (const linea of pedido.lineas) {
     const receta = db.recetas.find(
@@ -36,24 +51,27 @@ function moverStockPorPedido(
     );
     if (!receta) continue; // producto sin receta definida (DEMO): no descuenta insumos
 
-    const insumosReceta = db.recetaInsumos.filter(
-      (ri) => ri.recetaId === receta.id
-    );
+    const insumosReceta = recetaInsumosPorRecetaId.get(receta.id) ?? [];
 
-    for (const ri of insumosReceta) {
-      const delta = signo * ri.cantidad * linea.cantidad;
+    const explotados = insumosReceta.flatMap((ri) =>
+      explotarAInsumosBase(ri.insumoId, ri.cantidad, insumosPorId, recetaInsumosPorRecetaId)
+    );
+    const insumosBaseAMover = agregarCantidades(explotados);
+
+    for (const item of insumosBaseAMover) {
+      const delta = signo * item.cantidad * linea.cantidad;
       if (delta === 0) continue;
 
       let stock = db.stock.find(
-        (s) => s.ubicacionId === pedido.ubicacionId && s.insumoId === ri.insumoId
+        (s) => s.ubicacionId === pedido.ubicacionId && s.insumoId === item.insumoId
       );
       if (!stock) {
         // No deberia ocurrir si el insumo fue sembrado para la ubicacion; se crea
         // en 0 para no perder el movimiento (DEMO: robustez ante datos faltantes).
         stock = {
-          id: `stock-${ri.insumoId}-${pedido.ubicacionId}`,
+          id: `stock-${item.insumoId}-${pedido.ubicacionId}`,
           ubicacionId: pedido.ubicacionId,
-          insumoId: ri.insumoId,
+          insumoId: item.insumoId,
           cantidadActual: 0,
           actualizadoEn: ahora(),
         };
@@ -81,7 +99,7 @@ function moverStockPorPedido(
           pedidoId: pedido.id,
           lineaDePedidoId: linea.id,
           productoId: linea.productoId,
-          insumoId: ri.insumoId,
+          insumoId: item.insumoId,
           cantidadAnterior: anterior,
           cantidadNueva: stock.cantidadActual,
           movimiento: delta,
@@ -91,7 +109,16 @@ function moverStockPorPedido(
       // Auto-86 (Fase A, 2026-07-22 — idea de innovacion de la llamada de
       // revision): si este movimiento dejo el insumo en cero (o menos), 86
       // automaticamente cualquier producto cuya receta dependa de el.
-      verificarAuto86PorInsumo(ri.insumoId, pedido.ubicacionId);
+      //
+      // LIMITACION CONOCIDA (Fase B): esto solo 86 productos cuya Receta
+      // referencia DIRECTAMENTE `item.insumoId` (el insumo HOJA tras
+      // explotar). Un producto que dependa de el SOLO de forma indirecta via
+      // un insumo elaborado intermedio (ej. "ORIGINAL CHOP-CHOP" via la salsa
+      // demo, ver Anexo A.3) no se 86 automaticamente si se agota un insumo
+      // base de esa salsa — el auto-86 no atraviesa el BOM multi-nivel en
+      // este alcance. Documentado como seguimiento futuro, no bloqueante para
+      // el alcance de esta tarea (costeo + descuento de stock, no auto-86).
+      verificarAuto86PorInsumo(item.insumoId, pedido.ubicacionId);
     }
   }
 }

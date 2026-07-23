@@ -1,16 +1,45 @@
 "use client";
 
 /**
- * Sesion DEMO del shell — DUENO: shell de UI (etapa 1 de 3 de este proyecto).
+ * Sesion del shell — DUENO: shell de UI (etapa 1 de 3 de este proyecto).
  *
- * MECANISMO 100% DEMO: no hay JWT ni cookies de servidor. Solo se guarda el
- * `usuarioId` en localStorage (namespace `ck-pos:sesion`); en cada carga se
- * vuelve a resolver usuario+rol contra el servidor (GET /api/v1/auth/sesion)
- * para no confiar en datos viejos del navegador (ej. usuario dado de baja).
- * La etapa 2 de este proyecto reemplazara este flujo por TOTP + verificacion
- * facial (ver ADRs de seguridad); ese reemplazo deberia poder conservar la
- * misma forma de `useSesion()` (usuarioActual/login/logout) que consume el
- * resto del shell, cambiando solo la implementacion interna.
+ * ============================================================================
+ * QUE ES REAL Y QUE SIGUE SIENDO UNA SIMPLIFICACION (Fase B/seguridad,
+ * revision 2026-07-22 — reemplazo del mecanismo anterior "100% DEMO"):
+ *
+ * REAL a partir de este cambio: lo que se guarda en localStorage (namespace
+ * `ck-pos:sesion`, ver lib/shell/tokenSesionCliente.ts) ya NO es el
+ * `usuarioId` en texto plano — es un TOKEN DE SESION FIRMADO (JWT, ver
+ * lib/auth/sesionToken.ts) con expiracion (12h). El servidor SIEMPRE
+ * verifica la firma y la expiracion de ese token (nunca solo lo decodifica y
+ * confia) antes de resolver ningun `usuarioId` a partir de el — tanto al
+ * restaurar la sesion en cada carga (GET /api/v1/auth/sesion) como en las
+ * rutas sensibles que lo exigen (descuentos, reembolsos, cierre Z, baja de
+ * empleado; ver la lista completa en lib/auth/sesionToken.ts). Antes de este
+ * cambio, escribir CUALQUIER string en localStorage alcanzaba para hacerse
+ * pasar por ese usuario; ahora hace falta la firma criptografica del
+ * servidor, que el cliente no puede producir.
+ *
+ * TODAVIA UNA SIMPLIFICACION (limitacion real que queda, no ocultarla):
+ *  - El token sigue viviendo en `localStorage`, no en una cookie `httpOnly`.
+ *    Un XSS en el frontend podria robarlo igual que hoy roba cualquier otro
+ *    dato de la pagina — la diferencia es que YA NO alcanza con inventar un
+ *    string cualquiera, hace falta robar un token real y vigente.
+ *  - No hay revocacion server-side de tokens individuales (sin "cerrar todas
+ *    mis sesiones"): un token robado sigue siendo valido hasta que expira
+ *    por su cuenta (max. 12h).
+ *  - Esto sigue siendo login por PIN de 4 digitos (ver lib/auth/autenticacion.ts
+ *    para el detalle de esa simplificacion, sin relacion con este cambio).
+ *  - La MAYORIA de las rutas de la API (fuera de la lista puntual de arriba)
+ *    todavia reciben `usuarioId` del body/query tal cual lo manda el cliente,
+ *    sin verificar el token — ver el listado explicito en
+ *    lib/auth/sesionToken.ts de que quedo cubierto y que no.
+ *
+ * La etapa 2 de este proyecto reemplazara ademas el metodo de login por TOTP
+ * + verificacion facial (ver ADRs de seguridad); ese reemplazo deberia poder
+ * conservar la misma forma de `useSesion()` (usuarioActual/login/logout) que
+ * consume el resto del shell, cambiando solo la implementacion interna.
+ * ============================================================================
  */
 
 import {
@@ -27,8 +56,9 @@ import {
   obtenerSesionActual,
   type UsuarioSinPin,
 } from "@/components/shell/api";
+import { CLAVE_STORAGE_SESION } from "./tokenSesionCliente";
 
-const CLAVE_STORAGE = "ck-pos:sesion";
+const CLAVE_STORAGE = CLAVE_STORAGE_SESION;
 
 export interface UsuarioActual extends UsuarioSinPin {
   rol: Rol;
@@ -74,20 +104,23 @@ export function SesionProvider({ children }: { children: ReactNode }) {
     let vivo = true;
 
     async function restaurar() {
-      let usuarioId: string | null = null;
+      let token: string | null = null;
       try {
-        usuarioId = window.localStorage.getItem(CLAVE_STORAGE);
+        token = window.localStorage.getItem(CLAVE_STORAGE);
       } catch {
-        usuarioId = null;
+        token = null;
       }
 
-      if (!usuarioId) {
+      if (!token) {
         if (vivo) setCargando(false);
         return;
       }
 
       try {
-        const { usuario, rol } = await obtenerSesionActual(usuarioId);
+        // El servidor verifica firma + expiracion del token ANTES de resolver
+        // usuario+rol (ver GET /api/v1/auth/sesion); si el token es invalido/
+        // expirado, esto lanza y el catch de abajo limpia localStorage.
+        const { usuario, rol } = await obtenerSesionActual(token);
         if (vivo) setUsuarioActual({ ...usuario, rol });
       } catch {
         try {
@@ -108,10 +141,14 @@ export function SesionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function login(email: string, pin: string): Promise<void> {
-    const { usuario, rol } = await iniciarSesionPin(email, pin);
+    const { usuario, rol, token } = await iniciarSesionPin(email, pin);
     setUsuarioActual({ ...usuario, rol });
     try {
-      window.localStorage.setItem(CLAVE_STORAGE, usuario.id);
+      // Se guarda el TOKEN firmado (no el usuarioId en crudo, ver el aviso de
+      // cabecera de este archivo) — es lo unico que las rutas sensibles
+      // (descuentos, reembolsos, cierre Z, baja de empleado) aceptaran de
+      // aca en adelante para resolver la identidad del cajero/gerente.
+      window.localStorage.setItem(CLAVE_STORAGE, token);
     } catch {
       // Sin localStorage: la sesion sigue activa en memoria para esta pestana.
     }
@@ -146,11 +183,21 @@ export function SesionProvider({ children }: { children: ReactNode }) {
 
   async function refrescarSesion(): Promise<void> {
     if (!usuarioActual) return;
+    let token: string | null = null;
     try {
-      const { usuario, rol } = await obtenerSesionActual(usuarioActual.id);
+      token = window.localStorage.getItem(CLAVE_STORAGE);
+    } catch {
+      token = null;
+    }
+    if (!token) return;
+    try {
+      const { usuario, rol } = await obtenerSesionActual(token);
       setUsuarioActual({ ...usuario, rol });
     } catch {
-      // Si falla (ej. sin red), se mantiene el estado actual: no es critico.
+      // Si falla (ej. sin red, o el token ya expiro), se mantiene el estado
+      // actual: no es critico para este refresco puntual (el proximo reload
+      // de pagina de todas formas pasa por `restaurar()`, que si limpia la
+      // sesion si el token ya no es valido).
     }
   }
 

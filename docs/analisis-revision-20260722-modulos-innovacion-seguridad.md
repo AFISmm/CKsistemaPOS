@@ -57,3 +57,49 @@ Esto es una **reducción de alcance**, no un bug a corregir: los defectos ya doc
 nómina (retención solo sobre bruto, regla única de horas extra, propinas ligadas a quien abrió el turno —
 ver `PLAN_DE_PRODUCCION.md` §6) siguen siendo válidos como deuda técnica de la DEMO, pero dejan de ser
 relevantes para producción en la parte de cálculo/pago, precisamente porque esa parte no va a existir ahí.
+
+## Sección 2.3 — Gestión de menú: clasificación de modificadores, costeo e insumos elaborados (Fase B, 2026-07-22)
+
+A partir del hallazgo ya listado arriba ("gestión de menú: ... clasificar modificadores") y de la matriz de
+Alsea (S-16), esta Fase B implementa 4 piezas sobre el catálogo real importado (ver Anexo abajo para el
+detalle de datos): (1) una clasificación de PRESENTACIÓN de modificador (`Modificador.categoria`:
+topping/salsa/sustitución/otro, ver `lib/domain/types.ts`) independiente de `TipoModificador` (mecánica);
+(2) costos DEMO estimados por insumo (`Insumo.costoUnitarioCentavos`); (3) un ejemplo funcional de BOM
+multi-nivel (`Insumo.recetaBaseId`); (4) un catálogo DEMO de alérgenos por insumo (`Insumo.alergenos`,
+`TipoAlergeno`) con un cálculo de alérgenos efectivos al simular "sin X". Las 4 son heurísticas/estimados
+DEMO explícitamente documentados como tales (no datos reales verificados), siguiendo la misma convención de
+`[SUPUESTO]` documentado + avanzar que ya usa `docs/requisitos.md` — ver Anexo.
+
+## Anexo — Hallazgos de verificación de datos del import de `Recetario_Simplificado.xlsx` (Fase A/B)
+
+**A.1 — Costo del insumo no es un dato importable.** El archivo fuente trae una columna "Costo ($)" por
+línea de ingrediente, pero se verificó que NO es un costo unitario confiable: el mismo insumo (ej. "SALT
+IODIZED GRANULAR", usado 185 veces en el archivo) implica un costo-por-onza que varía entre $0.019 y $3.58
+según la receta en la que aparece — ~180x de varianza. `scripts/importar-recetario.js` documenta esto y
+excluye esa columna del import por completo (ver su encabezado). Fase B NO intenta rescatar ese dato: en vez
+de eso, `Insumo.costoUnitarioCentavos` se puebla con un ESTIMADO DEMO por categoría de insumo (proteína,
+producto fresco, lácteo, especia/seco, salsa/aderezo/aceite, pan/almidón, bebida, postre, empaque/desechable),
+detectada por palabras clave sobre el nombre real de cada uno de los 84 insumos (ver
+`lib/data/catalog-insumos-costos.demo.ts`), documentado como estimado pendiente de validar contra facturas
+reales.
+
+**A.2 — Sin evidencia de BOM multi-nivel real en el archivo.** Se verificó que el archivo fuente NO trae
+ningún caso real de un insumo que sea a su vez un producto elaborado a partir de otros insumos del mismo
+archivo (0 coincidencias entre nombres de ingrediente y nombres de producto). Por eso el modelo de import
+original (`scripts/importar-recetario.js`) es plano a propósito: `Producto -> Receta -> RecetaInsumo ->
+Insumo`, sin niveles intermedios.
+
+**A.3 — Ejemplo demo fabricado de BOM multi-nivel (Fase B, 2026-07-22).** Para no dejar la capacidad de BOM
+multi-nivel del modelo de dominio (`Insumo.recetaBaseId`, agregado en Fase B) completamente sin ejercitar, se
+construyó UN ejemplo end-to-end, **explícitamente fabricado como simplificación de demo**, no como una
+afirmación sobre cómo opera realmente Chicken Kitchen: la salsa real "GARLIC CILANTRO" (categoría Sauces,
+`prod-real-sauces-garlic-cilantro-3`, con receta real de limón, ajo, mayonesa, sal, cilantro y crema agria)
+se modela ADEMÁS como un insumo compuesto (`insu-demo-salsa-garlic-cilantro-preparada`, ver
+`lib/data/catalog-demo-fase-b.ts`) y se agrega como un ingrediente extra de "ORIGINAL CHOP-CHOP"
+(`prod-real-chop-chop-original-chop-chop-21`), un plato real de la misma familia (Chop-Chop) que en el
+archivo fuente NO incluye esa salsa. Esto crea una cadena real de 2 niveles (Plato → usa la Salsa como
+insumo → la Salsa tiene su propia receta de insumos base) sobre la que SÍ cascadea correctamente el descuento
+de stock (`lib/inventory/inventario.ts` / `lib/inventory/bom.ts`) y el costeo (`lib/menu/costeo.ts`). Sigue
+abierta la pregunta operativa de S-14 (`docs/requisitos.md`): si Chicken Kitchen realmente prepara esta u
+otra salsa en tienda a partir de insumos base, o las compra ya hechas — este ejemplo NO resuelve esa
+pregunta, solo demuestra que el código puede modelarla correctamente el día que se confirme.

@@ -317,6 +317,35 @@ concreta de pasos pendientes antes del piloto, empezando por ese simulacro
   Web Speech APIs reales del navegador, 100% cliente, sin backend ni claves de API de voz. Detalle
   completo en `README-DEMO.md`, sección "Chatbot de ayuda".
 
+## Fase B (2026-07-22/23) — datos reales sustituidos por DEMO, seguridad de sesión
+Ejecutada tras la reunión de revisión del 22 de julio y la tabla de fases en chat con corte
+29 de julio. Tres paquetes en paralelo, cada uno verificado de forma independiente (build +
+`npx vitest run` + `npx tsc --noEmit`) antes de darse por completo — no se aceptó ningún reporte
+de un agente sin re-verificación propia.
+
+| Paquete | Entregable | Estado |
+|---------|------------|--------|
+| B1 — Catálogo/Menú | Modificadores categorizados, costeo DEMO (`lib/menu/costeo.ts`), un ejemplo de BOM multinivel (`lib/inventory/bom.ts`), catálogo de alérgenos DEMO (`lib/menu/alergenos.ts`) — todo marcado explícitamente como dato DEMO, no real (ver hallazgo A.3 del Anexo del recetario: costos reales no son confiables tal cual) | COMPLETO, verificado |
+| B2 — Propinas por rol | `lib/propinas/reparto.ts`, `/propinas`, redondeo Hamilton (mayor resto) para exactitud a centavo | COMPLETO, verificado (17 tests nuevos) |
+| B3 — Tokens de sesión firmados | `lib/auth/sesionToken.ts` (JWT HS256 vía `jose`, TTL 12h), 5 rutas migradas a verificación real server-side (`descuento`, `reembolso`, `cierre-z`, `baja` de empleado, `GET /auth/sesion`); ~35 rutas restantes documentadas como pendientes (fuera de alcance de 7 días) | COMPLETO, verificado |
+
+**Bug real encontrado y corregido durante la verificación propia de B3** (no reportado por el
+agente, detectado porque `npx vitest run` completo se corrió 3 veces y falló intermitentemente):
+`lib/auth/__tests__/sesionToken.test.ts` tamperizaba la firma del JWT alterando el ÚLTIMO carácter
+del token (`'a'`↔`'b'`). Para una firma HS256 de 32 bytes, el último grupo base64url codifica solo
+2 bytes reales en 3 caracteres, y los 2 bits menos significativos del último carácter son padding
+descartado al decodificar — `'a'` (011010) y `'b'` (011011) difieren solo en ese bit de padding, así
+que en aproximadamente 1 de cada 4 firmas (las que no usan tiempo congelado, por lo tanto varían por
+`iat`/`exp` real) el token "tamperizado" decodificaba a los mismos bytes de firma y verificaba como
+válido — una falla de test intermitente (falso negativo de seguridad en el test, NO una vulnerabilidad
+real de `jose`/JWT). Corregido reemplazando el tamper por un XOR real sobre los bytes decodificados de
+la firma (`tamperizarFirma()`), que garantiza un cambio de bytes en toda ejecución. Verificado estable
+en 5 corridas consecutivas tras el fix.
+
+Verificación final combinada: `npm run build` (0 errores TS, todas las rutas generadas, incl.
+`/propinas`, `/jornada/codigo-gerencial`), `npx vitest run` (113/113), suite legado `node:test`
+(31/31), `npx tsc --noEmit` (limpio). `store-server/` no tocado (fuera del repo de este proyecto).
+
 ## Preguntas abiertas (heredadas, para versión productiva)
 - S-05: store-and-forward del PSP real. S-06/S-08: tasas e impuestos oficiales.
   S-02: drivers de periféricos.

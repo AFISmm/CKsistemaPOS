@@ -7,7 +7,7 @@
  * dominio importados con `import type`.
  */
 
-import type { Categoria, Insumo, Producto, Receta, RecetaInsumo } from "@/lib/domain/types";
+import type { Categoria, Insumo, Producto, Receta, RecetaInsumo, TipoAlergeno } from "@/lib/domain/types";
 
 const BASE_URL = "/api/v1";
 
@@ -126,6 +126,12 @@ export interface RecetaDeProducto {
   productoId: string;
   receta: Receta | null;
   items: RecetaInsumoConNombre[];
+  /** Costo estimado DEMO (centavos) de estos insumos a estas cantidades — ver lib/menu/costeo.ts. null = sin receta o sin costo. */
+  costoEstimadoCentavos: number | null;
+  /** true si el costo de arriba es parcial (algun insumo sin costoUnitarioCentavos). */
+  costoIncompleto: boolean;
+  /** Alergenos DEMO (heuristica de nombre, ver lib/data/catalog-insumos-alergenos.demo.ts) — no son datos reales verificados. */
+  alergenos: TipoAlergeno[];
 }
 
 export interface ItemRecetaBody {

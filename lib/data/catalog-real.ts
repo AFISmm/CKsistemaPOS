@@ -10,15 +10,22 @@
  * y `lib/data/catalog-recetario.generado.ts` (auto-generado, no editar a mano)
  * para los datos en si.
  *
- * Combos / GrupoModificador / Modificador quedan vacios a proposito: el
- * archivo fuente es un recetario de costos, no una definicion de grupos de
- * modificadores, y no hay forma confiable de derivarlos de el (ver caveats en
- * el script de import). El modelo de dominio soporta un catalogo sin estas
- * colecciones (ver components/pos/__tests__/api.test.ts, que ya prueba
- * gruposModificador: [] como caso valido).
+ * AGREGADO Fase B (2026-07-22, ver docs/analisis-revision-20260722-modulos-innovacion-seguridad.md
+ * Anexo y docs/requisitos.md S-14/S-16): `enriquecerCatalogoFaseB` (lib/data/catalog-demo-fase-b.ts)
+ * es un paso de POST-PROCESAMIENTO sobre la salida cruda del import (NO toca
+ * catalog-recetario.generado.ts) que agrega, con DEMO claramente documentado:
+ *  - Costo/alergenos estimados por insumo (los 84 reales).
+ *  - UN insumo compuesto demo (BOM multi-nivel, Anexo A.3).
+ *  - Un catalogo curado de GrupoModificador/Modificador (Sauces/Dressings/
+ *    Toppings/Modifiers reales) para 6 platos ancla, con `Modificador.categoria`
+ *    poblado por la heuristica de hoja/categoria de origen documentada en
+ *    lib/domain/types.ts (`CategoriaModificador`).
+ * `Combo` sigue vacio a proposito: el archivo fuente no trae informacion para
+ * derivarlo de forma confiable (ver caveats en el script de import).
  */
 
 import type { SeedCatalogo } from "../domain/types";
+import { enriquecerCatalogoFaseB } from "./catalog-demo-fase-b";
 import {
   CATEGORIAS_RECETARIO,
   INSUMOS_RECETARIO,
@@ -29,7 +36,7 @@ import {
 } from "./catalog-recetario.generado";
 
 export function getSeedCatalogo(): SeedCatalogo {
-  return {
+  const crudo: SeedCatalogo = {
     categorias: CATEGORIAS_RECETARIO,
     productos: PRODUCTOS_RECETARIO,
     combos: [],
@@ -40,4 +47,5 @@ export function getSeedCatalogo(): SeedCatalogo {
     recetaInsumos: RECETA_INSUMOS_RECETARIO,
     stockInicial: STOCK_INICIAL_RECETARIO,
   };
+  return enriquecerCatalogoFaseB(crudo);
 }

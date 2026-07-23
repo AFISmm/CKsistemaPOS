@@ -21,6 +21,7 @@ import type {
 import { guardarCatalogoCache, obtenerCatalogoCache } from "@/lib/offline/db";
 import { encolarEscritura } from "@/lib/offline/queue";
 import { uuidv7 } from "@/lib/offline/uuidv7";
+import { headerAutorizacionSesion } from "@/lib/shell/tokenSesionCliente";
 
 export interface CatalogoResponse {
   categorias: Categoria[];
@@ -287,9 +288,18 @@ export function enviarACocina(pedidoId: string): Promise<Pedido> {
   });
 }
 
+/**
+ * AGREGADO (Fase B/seguridad, revision 2026-07-22): esta ruta ahora exige
+ * sesion valida server-side (ver app/api/v1/pedidos/[id]/descuento/route.ts
+ * y lib/auth/sesionToken.ts) — se adjunta el token guardado como header
+ * `Authorization`. El `usuarioId` de `body` se sigue mandando por
+ * compatibilidad, pero el servidor usa el del token verificado (y rechaza si
+ * no coinciden), asi que ya no hace falta confiar en el valor del body.
+ */
 export function aplicarDescuento(pedidoId: string, body: DescuentoBody): Promise<Pedido> {
   return solicitarPedido(`/pedidos/${pedidoId}/descuento`, {
     method: "POST",
+    headers: headerAutorizacionSesion(),
     body: JSON.stringify(body),
   });
 }
