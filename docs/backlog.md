@@ -202,6 +202,21 @@ documento operativo ("Qué falta validar con Postgres real") para la lista
 concreta de pasos pendientes antes del piloto, empezando por ese simulacro
 (un backup que nunca se restauró no es un backup confiable).
 
+## Análisis de dominio — llamada de revisión (2026-07-22)
+> Ver `docs/analisis-revision-20260722-modulos-innovacion-seguridad.md`. Revisión de la demo actual
+> (pantalla compartida) con Diego Cataño y Mateo Franco. Entregable solicitado por el usuario: documento
+> Word `Revision-POS-20260722-Modulos-e-Innovacion.docx` (generado, no se commitea — ver `.gitignore`).
+| Ítem | Estado | Detalle |
+|------|--------|---------|
+| Flujo cobrar-vs-enviar-a-cocina debe ser configurable | DOCUMENTADO, NO IMPLEMENTADO | Cambio estructural del flujo de venta; valor por defecto para Chicken Kitchen: cobrar antes de enviar a cocina |
+| Interfaz condicional según permisos (sin sidebar si solo hay un módulo) | DOCUMENTADO, NO IMPLEMENTADO | Mejora de UX/velocidad (RNF-01/RNF-03) |
+| Agregadores (Uber/DoorDash/Olo) deben entrar directo a cocina, no a cola de cobro | DOCUMENTADO PARA FASE FUTURA | Corrección de diseño para cuando se construya la integración (fuera del MVP actual) |
+| S-17 — Reducción de alcance de nómina (retirar cálculo/pago real) | **DECISIÓN FORMAL** | Ver `docs/requisitos.md` S-17 |
+| Apertura/cierre de caja con bloqueos duros + conciliación de datáfono | BACKLOG NUEVO | No tomar pedidos sin turno abierto; no permitir clock-out con turno abierto; conciliar por franquicia de tarjeta |
+| Reparto de propinas por rol/puntos | BACKLOG NUEVO | Herramienta operativa, explícitamente no contable/fiscal |
+| Ideas de innovación (chatbot por voz manos libres, QR rotativo para clock-in, auto-86, etc.) | DOCUMENTADAS | Ver documento Word/análisis §6 para las 8 ideas priorizadas por esfuerzo/impacto |
+| Plan de seguridad para producción | DOCUMENTADO | Ver documento Word/análisis §7 — incluye aclaración honesta sobre límites reales de "anti-clonación" de un frontend web |
+
 ## Fase 1.5 — Andamiaje DEMO (orquestador)
 | Tarea | Dueño | Entregable | Estado |
 |-------|-------|------------|--------|
