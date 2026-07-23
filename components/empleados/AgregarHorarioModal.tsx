@@ -33,11 +33,34 @@
  * bloquear el guardado si el usuario autoriza el exceso. El backend vuelve a
  * calcular el mismo total al crear cada horario (defensa en profundidad /
  * verificable via curl directo).
+ *
+ * EDICION DE DIAS YA CARGADOS (Fase A, revision 2026-07-22 seccion 2.2): antes
+ * de este cambio, una fila con `existente` quedaba SOLO-LECTURA para siempre
+ * (unico camino para corregir un horario ya guardado era editar el store
+ * directo) -- callejon sin salida real reportado por el revisor. Ahora cada
+ * fila con `existente` tiene un boton "Editar" que la vuelve a poner en modo
+ * formulario (horas editables, misma validacion de rango que un dia nuevo) y
+ * llama a `editarHorario` (PATCH /api/v1/horarios/[id]) en vez de
+ * `crearHorario`. Deliberadamente NO se expone edicion de `fecha` aqui (solo
+ * horas): en este calendario semanal la fecha identifica la fila/columna, asi
+ * que cambiarla desde este UI tendria que "mover" la fila a otro dia, lo cual
+ * es mas confuso que util para el caso real (corregir una hora mal cargada);
+ * `lib/rrhh/horarios.ts` SI soporta editar `fecha` para quien consuma la API
+ * directamente. Tampoco se repite aqui el diálogo completo de "aviso de horas
+ * extra" (paso "confirmando"): tras guardar una edicion se muestra un aviso
+ * simple, no bloqueante, si el nuevo total de la semana supera 40h -- mismo
+ * espiritu informativo, alcance mas chico para no duplicar ese flujo completo
+ * en el camino de edicion.
  */
 
 import { useEffect, useState } from "react";
 import type { Empleado, HorarioTurno } from "@/lib/domain/types";
-import { crearHorario, listarHorarios, type NuevoHorarioBody } from "@/components/empleados/api";
+import {
+  crearHorario,
+  editarHorario,
+  listarHorarios,
+  type NuevoHorarioBody,
+} from "@/components/empleados/api";
 import { useI18n } from "@/lib/shell/I18nProvider";
 import { textoErrorApi } from "@/lib/i18n/erroresApi";
 
@@ -145,6 +168,15 @@ export default function AgregarHorarioModal({
   const [error, setError] = useState<string | null>(null);
   /** true en cuanto se guarda con exito al menos un dia en esta sesion del modal (para saber si "Cancelar" debe refrescar al padre). */
   const [algunoGuardado, setAlgunoGuardado] = useState(false);
+  /** Edicion en curso de un dia YA cargado (existente), o null si ninguno se esta editando. */
+  const [edicion, setEdicion] = useState<{
+    fecha: string;
+    horaInicio: string;
+    horaFin: string;
+    guardando: boolean;
+    error: string | null;
+    avisoOvertime: string | null;
+  } | null>(null);
 
   useEffect(() => {
     let cancelado = false;
@@ -182,6 +214,7 @@ export default function AgregarHorarioModal({
     setDias(filasVacias(sumarDiasISO(lunes, deltaDias)));
     setLunes((actual) => sumarDiasISO(actual, deltaDias));
     setError(null);
+    setEdicion(null);
   }
 
   function actualizarFila(fecha: string, cambios: Partial<FilaDia>) {
@@ -198,6 +231,67 @@ export default function AgregarHorarioModal({
       if (!f.existente) return acc;
       return acc + (minutosDesdeHHMM(f.existente.horaFinProgramada) - minutosDesdeHHMM(f.existente.horaInicioProgramada));
     }, 0);
+  }
+
+  /** Abre el modo edicion para un dia YA cargado (fila con `existente`). */
+  function iniciarEdicion(f: FilaDia) {
+    if (!f.existente) return;
+    setEdicion({
+      fecha: f.fecha,
+      horaInicio: f.existente.horaInicioProgramada,
+      horaFin: f.existente.horaFinProgramada,
+      guardando: false,
+      error: null,
+      avisoOvertime: null,
+    });
+  }
+
+  /** Guarda la edicion de horas de un dia ya cargado via PATCH /api/v1/horarios/[id]. */
+  async function guardarEdicion() {
+    if (!edicion) return;
+    const fila = dias.find((f) => f.fecha === edicion.fecha);
+    if (!fila?.existente) return;
+
+    const duracion = minutosDesdeHHMM(edicion.horaFin) - minutosDesdeHHMM(edicion.horaInicio);
+    if (duracion <= 0) {
+      setEdicion((prev) => (prev ? { ...prev, error: t("empleados.modal.errorRangoHoras") } : prev));
+      return;
+    }
+
+    setEdicion((prev) => (prev ? { ...prev, guardando: true, error: null } : prev));
+    try {
+      const { horario, minutosTotalesSemana: totalTrasEditar } = await editarHorario(fila.existente.id, {
+        horaInicioProgramada: edicion.horaInicio,
+        horaFinProgramada: edicion.horaFin,
+      });
+      setDias((previas) => previas.map((f) => (f.fecha === edicion.fecha ? { ...f, existente: horario } : f)));
+      setAlgunoGuardado(true);
+      if (totalTrasEditar > LIMITE_HORAS_REGULARES_SEMANA_MIN) {
+        // Aviso simple, no bloqueante (el guardado ya ocurrio): mismo
+        // criterio informativo que el paso "confirmando" de creacion, pero
+        // sin repetir ese dialogo completo aqui (ver comentario de cabecera).
+        setEdicion((prev) =>
+          prev
+            ? {
+                ...prev,
+                guardando: false,
+                avisoOvertime: t("empleados.modal.overtimeMensaje", {
+                  nombre: empleado.nombre,
+                  horas: formatearHoras(totalTrasEditar),
+                }),
+              }
+            : prev
+        );
+      } else {
+        setEdicion(null);
+      }
+    } catch (err) {
+      setEdicion((prev) =>
+        prev
+          ? { ...prev, guardando: false, error: textoErrorApi(err, t, "empleados.modal.errorNoPudoEditarHorario") }
+          : prev
+      );
+    }
   }
 
   /** Guarda secuencialmente cada dia candidato. Si uno falla, deja los ya guardados bloqueados y el resto editable para reintentar. */
@@ -390,7 +484,51 @@ export default function AgregarHorarioModal({
                       <p className="text-xs text-neutral-500 dark:text-neutral-400">{f.fecha}</p>
                     </div>
 
-                    {f.existente ? (
+                    {f.existente && edicion?.fecha === f.fecha ? (
+                      <div className="flex flex-1 flex-wrap items-center gap-3">
+                        <input
+                          type="time"
+                          aria-label={t("empleados.modal.campoHoraInicio")}
+                          value={edicion.horaInicio}
+                          disabled={edicion.guardando}
+                          onChange={(e) =>
+                            setEdicion((prev) => (prev ? { ...prev, horaInicio: e.target.value, error: null } : prev))
+                          }
+                          className="rounded-xl border border-neutral-300 px-3 py-1.5 text-sm text-ck-dark disabled:opacity-40 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
+                        />
+                        <span className="text-sm text-neutral-400">-</span>
+                        <input
+                          type="time"
+                          aria-label={t("empleados.modal.campoHoraFin")}
+                          value={edicion.horaFin}
+                          disabled={edicion.guardando}
+                          onChange={(e) =>
+                            setEdicion((prev) => (prev ? { ...prev, horaFin: e.target.value, error: null } : prev))
+                          }
+                          className="rounded-xl border border-neutral-300 px-3 py-1.5 text-sm text-ck-dark disabled:opacity-40 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
+                        />
+                        <button
+                          type="button"
+                          disabled={edicion.guardando}
+                          onClick={guardarEdicion}
+                          className="rounded-lg bg-ck-red px-2 py-1 text-xs font-bold text-white disabled:opacity-50"
+                        >
+                          {edicion.guardando ? t("empleados.modal.guardando") : t("empleados.modal.guardarCambios")}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={edicion.guardando}
+                          onClick={() => setEdicion(null)}
+                          className="rounded-lg border border-neutral-300 px-2 py-1 text-xs font-semibold text-neutral-600 dark:border-neutral-600 dark:text-neutral-300"
+                        >
+                          {t("empleados.modal.cancelar")}
+                        </button>
+                        {edicion.error && <p className="w-full text-xs text-ck-red dark:text-red-300">{edicion.error}</p>}
+                        {edicion.avisoOvertime && (
+                          <p className="w-full text-xs text-ck-gold">{edicion.avisoOvertime}</p>
+                        )}
+                      </div>
+                    ) : f.existente ? (
                       <div className="flex flex-1 flex-wrap items-center gap-3">
                         <span className="rounded-lg bg-neutral-200 px-2 py-1 text-xs font-semibold text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200">
                           {f.existente.horaInicioProgramada} - {f.existente.horaFinProgramada}
@@ -398,6 +536,13 @@ export default function AgregarHorarioModal({
                         <span className="text-xs italic text-neutral-500 dark:text-neutral-400">
                           {t("empleados.modal.diaYaTieneHorario")}
                         </span>
+                        <button
+                          type="button"
+                          onClick={() => iniciarEdicion(f)}
+                          className="rounded-lg border border-ck-gold px-2 py-1 text-xs font-semibold text-ck-gold"
+                        >
+                          {t("empleados.modal.editarHorario")}
+                        </button>
                       </div>
                     ) : (
                       <div className="flex flex-1 flex-wrap items-center gap-3">

@@ -4,18 +4,33 @@
  * Nuevo Pedido — submodulo de Terminal de Cajero (app/pos), no un modulo
  * nuevo del sidebar (ver lib/navigation/modulos.ts, sub-item "/pos/nuevo").
  *
- * Esta pantalla es EXCLUSIVAMENTE para armar el pedido del cliente: elegir
- * categorias/productos, modificadores, cantidades, notas, aplicar descuentos
- * si aplica, y "Enviar a cocina". A PROPOSITO no tiene boton de cobrar ni
- * recibo (ver components/pos/Ticket.tsx, prop `onAbrirCobro` opcional — aqui
- * simplemente no se provee): cobrar es responsabilidad de app/pos/page.tsx
- * (la pantalla de "revisar pedidos entregados por cocina y cobrar"), una vez
- * que cocina termina de prepararlo y lo envia a caja.
+ * Esta pantalla arma el pedido del cliente: elegir categorias/productos,
+ * modificadores, cantidades, notas, marcar "para llevar" y aplicar
+ * descuentos si aplica.
  *
- * Esta era la logica/render de app/pos/page.tsx ANTES de esta iteracion; se
- * movio aqui tal cual (menos cobro/recibo) cuando /pos paso a ser la pantalla
- * de cobro. Ver el comentario de cabecera de app/pos/page.tsx para el detalle
- * del nuevo flujo de negocio completo.
+ * FLUJO COBRAR-VS-COCINA CONFIGURABLE (Fase A, revision 2026-07-22 seccion
+ * 2.1 — ver `ModoOperacionUbicacion` en lib/domain/types.ts y la nota de
+ * cabecera de lib/sales/engine.ts):
+ *  - "mostrador" (default de la tienda piloto): ESTA pantalla YA tiene el
+ *    boton "Cobrar" (a diferencia de antes de esta iteracion) — el cajero
+ *    cobra en cuanto el ticket tiene lineas, sin tener que enviar a cocina
+ *    primero. Al completarse el pago (saldoPendiente <= 0) esta pantalla
+ *    dispara AUTOMATICAMENTE `enviarACocina` (el cajero no tiene que
+ *    acordarse de un paso aparte) y muestra el recibo; por eso el boton
+ *    manual "Enviar a Cocina" se OCULTA en este modo (ver
+ *    `ocultarBotonEnviarACocina` en components/pos/Ticket.tsx) — dejaria de
+ *    tener sentido como accion separada.
+ *  - "mesa" (flujo clasico, ej. la ubicacion demo de Austin): esta pantalla
+ *    se comporta EXACTAMENTE como antes de esta iteracion — sin boton de
+ *    cobrar ni recibo aqui, solo "Enviar a Cocina"; cobrar sigue siendo
+ *    responsabilidad de app/pos/page.tsx una vez que cocina entrega el
+ *    pedido a caja (estado "entregado").
+ *
+ * El modo se resuelve consultando `GET /api/v1/ubicaciones` y buscando la
+ * ubicacion del pedido recien creado (`pedido.ubicacionId`); si por algun
+ * motivo no se puede resolver (red/datos legados), se asume "mostrador" por
+ * ser el default real de la tienda piloto (mismo fallback que
+ * `modoOperacionDePedido` en lib/sales/engine.ts).
  */
 
 import Image from "next/image";
@@ -23,21 +38,26 @@ import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/lib/shell/I18nProvider";
 import FondoFoto from "@/components/shell/FondoFoto";
 import { textoErrorApi } from "@/lib/i18n/erroresApi";
-import type { Pedido, Producto } from "@/lib/domain/types";
+import type { ModoOperacionUbicacion, Pago, Pedido, Producto } from "@/lib/domain/types";
 import {
   actualizarLinea,
   agregarLinea,
   aplicarDescuento,
   crearPedido,
   enviarACocina,
+  marcarParaLlevar,
   obtenerCatalogo,
   obtenerPedido,
+  obtenerUbicaciones,
   type CatalogoResponse,
+  type PagoResponse,
 } from "@/components/pos/api";
 import CategoriasTabs from "@/components/pos/CategoriasTabs";
 import ProductosGrid from "@/components/pos/ProductosGrid";
 import ModificadorModal from "@/components/pos/ModificadorModal";
 import DescuentoModal from "@/components/pos/DescuentoModal";
+import CobroModal from "@/components/pos/CobroModal";
+import ReciboModal from "@/components/pos/ReciboModal";
 import Ticket from "@/components/pos/Ticket";
 import { useEstadoSync } from "@/lib/offline/useEstadoSync";
 
@@ -64,26 +84,43 @@ export default function NuevoPedidoPage() {
   const [aplicandoDescuento, setAplicandoDescuento] = useState(false);
   const [errorDescuento, setErrorDescuento] = useState<string | null>(null);
 
+  // ---------- Flujo cobrar-vs-cocina configurable (Fase A) ----------
+  const [modoOperacion, setModoOperacion] = useState<ModoOperacionUbicacion>("mostrador");
+  const [alternandoParaLlevar, setAlternandoParaLlevar] = useState(false);
+  const [mostrarCobro, setMostrarCobro] = useState(false);
+  const [saldoPendienteCobro, setSaldoPendienteCobro] = useState<number | null>(null);
+  const [pagosRealizados, setPagosRealizados] = useState<Pago[]>([]);
+  const [mostrarRecibo, setMostrarRecibo] = useState(false);
+
   // ---------- Estado offline (visible, sin bloquear al cajero) + cola F1-T3 ----------
   const { sinConexion, pendientes } = useEstadoSync();
 
-  // ---------- Inicializacion: crear pedido + cargar catalogo ----------
+  // ---------- Inicializacion: crear pedido + cargar catalogo + modo de operacion ----------
   const iniciar = useCallback(async () => {
     setCargandoInicial(true);
     setErrorInicial(null);
     try {
-      const [nuevoPedido, cat] = await Promise.all([
+      const [nuevoPedido, cat, ubicaciones] = await Promise.all([
         crearPedido({ canal: "mostrador" }),
         obtenerCatalogo(),
+        obtenerUbicaciones().catch(() => []),
       ]);
       setPedido(nuevoPedido);
       setCatalogo(cat);
+      const ubicacionDelPedido = ubicaciones.find((u) => u.id === nuevoPedido.ubicacionId);
+      // Default "mostrador" si no se pudo resolver (sin red / dato legado):
+      // mismo fallback que `modoOperacionDePedido` en lib/sales/engine.ts.
+      setModoOperacion(ubicacionDelPedido?.modoOperacion ?? "mostrador");
       const primeraActiva = [...cat.categorias]
         .filter((c) => c.activo)
         .sort((a, b) => a.orden - b.orden)[0];
       setCategoriaActivaId(primeraActiva?.id ?? null);
       setMostrarDescuento(false);
       setProductoEnModal(null);
+      setMostrarCobro(false);
+      setSaldoPendienteCobro(null);
+      setPagosRealizados([]);
+      setMostrarRecibo(false);
     } catch (err) {
       setErrorInicial(textoErrorApi(err, t, "pos.errorNoPudoIniciar"));
     } finally {
@@ -228,6 +265,60 @@ export default function NuevoPedidoPage() {
     }
   }
 
+  // ---------- Para llevar (empaque automatico, Fase A) ----------
+  async function alternarParaLlevar(paraLlevar: boolean) {
+    if (!pedido) return;
+    setAlternandoParaLlevar(true);
+    setErrorGlobal(null);
+    try {
+      await marcarParaLlevar(pedido.id, paraLlevar);
+      await refrescarPedido(pedido.id);
+    } catch (err) {
+      setErrorGlobal(textoErrorApi(err, t, "pos.errorNoPudoMarcarParaLlevar"));
+    } finally {
+      setAlternandoParaLlevar(false);
+    }
+  }
+
+  // ---------- Cobro (flujo mostrador pay-first, Fase A) ----------
+  function abrirCobro() {
+    if (!pedido) return;
+    setSaldoPendienteCobro((prev) => prev ?? pedido.total);
+    setMostrarCobro(true);
+  }
+
+  function manejarPagoRegistrado(resultado: PagoResponse) {
+    setPedido(resultado.pedido);
+    setSaldoPendienteCobro(resultado.saldoPendiente);
+    setPagosRealizados((prev) => [...prev, resultado.pago]);
+    if (
+      resultado.saldoPendiente <= 0 &&
+      (resultado.pago.estado === "aprobado" || resultado.pago.estado === "encolado")
+    ) {
+      setMostrarCobro(false);
+      setMostrarRecibo(true);
+      // Flujo mostrador pay-first: el pedido acaba de saldarse ("cobrado")
+      // ANTES de pasar por cocina; disparamos el envio a cocina de inmediato
+      // (el cajero no tiene que acordarse de un paso aparte, ver nota de
+      // cabecera del archivo). Si esto llegara a fallar (ej. red), no
+      // bloqueamos el recibo (el cobro YA ocurrio) — solo avisamos en
+      // errorGlobal; el pedido queda "cobrado" pero sin `enviadoACocinaEn`,
+      // recuperable reintentando desde la pantalla de KDS/soporte si hiciera
+      // falta (caso borde, no bloqueante para la demo).
+      enviarACocina(resultado.pedido.id)
+        .then((actualizado) => setPedido(actualizado))
+        .catch((err) => setErrorGlobal(textoErrorApi(err, t, "pos.errorNoPudoEnviarCocina")));
+    }
+  }
+
+  const propinaAcumuladaCobro = pagosRealizados.reduce((acc, p) => acc + p.propina, 0);
+
+  /** Cierra el recibo y arranca un pedido nuevo (mismo criterio que "Reiniciar" del flujo mesa). */
+  async function cerrarReciboYReiniciar() {
+    setMostrarRecibo(false);
+    await iniciar();
+  }
+
   // ---------- Reiniciar (empezar otro pedido tras enviar el actual a cocina) ----------
   async function reiniciarPedido() {
     await iniciar();
@@ -348,6 +439,10 @@ export default function NuevoPedidoPage() {
           onEliminarLinea={eliminarLinea}
           onEnviarACocina={manejarEnviarACocina}
           onAbrirDescuento={() => setMostrarDescuento(true)}
+          onCambiarParaLlevar={alternarParaLlevar}
+          paraLlevarEnviando={alternandoParaLlevar}
+          onAbrirCobro={modoOperacion === "mostrador" ? abrirCobro : undefined}
+          ocultarBotonEnviarACocina={modoOperacion === "mostrador"}
         />
       </div>
 
@@ -372,6 +467,26 @@ export default function NuevoPedidoPage() {
             setMostrarDescuento(false);
             setErrorDescuento(null);
           }}
+        />
+      )}
+
+      {mostrarCobro && pedido && (
+        <CobroModal
+          pedido={pedido}
+          saldoPendiente={saldoPendienteCobro ?? pedido.total}
+          propinaAcumulada={propinaAcumuladaCobro}
+          historialPagos={pagosRealizados}
+          sinConexion={sinConexion}
+          onCerrar={() => setMostrarCobro(false)}
+          onPagoRegistrado={manejarPagoRegistrado}
+        />
+      )}
+
+      {mostrarRecibo && pedido && (
+        <ReciboModal
+          pedido={pedido}
+          pagos={pagosRealizados}
+          onNuevoPedido={cerrarReciboYReiniciar}
         />
       )}
     </main>

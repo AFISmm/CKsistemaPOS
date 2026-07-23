@@ -16,6 +16,7 @@ import type {
   Pedido,
   Pago,
   Producto,
+  Ubicacion,
 } from "@/lib/domain/types";
 import { guardarCatalogoCache, obtenerCatalogoCache } from "@/lib/offline/db";
 import { encolarEscritura } from "@/lib/offline/queue";
@@ -219,6 +220,16 @@ export async function obtenerCatalogo(): Promise<CatalogoResponse> {
   }
 }
 
+/**
+ * Lista de ubicaciones (Fase A, flujo cobrar-vs-cocina configurable): usada
+ * por app/pos/nuevo para resolver `Ubicacion.modoOperacion` de la ubicacion
+ * del pedido recien creado y decidir si mostrar "Cobrar" ya en esta pantalla
+ * (mostrador) o mantener el flujo clasico (mesa).
+ */
+export function obtenerUbicaciones(): Promise<Ubicacion[]> {
+  return solicitar<{ ubicaciones: Ubicacion[] }>("/ubicaciones").then((r) => r.ubicaciones);
+}
+
 export function crearPedido(input?: {
   nombreCliente?: string;
   canal?: string;
@@ -280,6 +291,19 @@ export function aplicarDescuento(pedidoId: string, body: DescuentoBody): Promise
   return solicitarPedido(`/pedidos/${pedidoId}/descuento`, {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Marca/desmarca el pedido como "para llevar" (Fase A, empaque automatico):
+ * al pasar a true, el backend (`marcarParaLlevar`, lib/sales/engine.ts)
+ * agrega automaticamente el cargo de empaque sin que el cajero tenga que
+ * hacerlo aparte.
+ */
+export function marcarParaLlevar(pedidoId: string, paraLlevar: boolean): Promise<Pedido> {
+  return solicitarPedido(`/pedidos/${pedidoId}/para-llevar`, {
+    method: "PATCH",
+    body: JSON.stringify({ paraLlevar }),
   });
 }
 

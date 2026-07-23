@@ -123,16 +123,34 @@ export function extraerTranscripcion(evento: EventoResultadoReconocimiento): {
  * curso primero (evita superponer audios si el usuario encadena preguntas).
  * No lanza si `speechSynthesis` no esta disponible o falla: simplemente omite
  * la lectura en voz alta (la respuesta en texto siempre queda en el chat).
+ *
+ * `alTerminar` (AGREGADO para el modo "manos libres" del chatbot, ver
+ * ChatbotWidget.tsx): callback opcional invocado cuando la lectura TERMINA
+ * (evento `onend`) o si FALLA a mitad de camino (`onerror`) — en ambos casos
+ * se llama, para que quien encadena "escuchar de nuevo" despues de hablar
+ * (modo manos libres) nunca se quede esperando para siempre si el audio
+ * falla. Si `ttsDisponible()` es false o `speechSynthesis.speak` lanza de
+ * entrada, se invoca `alTerminar` igual (de forma sincrona) para no romper esa
+ * cadena. Los llamadores existentes que no pasan este parametro (modo
+ * "Audio" normal del chatbot) no cambian de comportamiento.
  */
-export function hablar(texto: string, idioma: Idioma): void {
-  if (!ttsDisponible()) return;
+export function hablar(texto: string, idioma: Idioma, alTerminar?: () => void): void {
+  if (!ttsDisponible()) {
+    alTerminar?.();
+    return;
+  }
   try {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(texto);
     utterance.lang = codigoIdiomaVoz(idioma);
+    if (alTerminar) {
+      utterance.onend = () => alTerminar();
+      utterance.onerror = () => alTerminar();
+    }
     window.speechSynthesis.speak(utterance);
   } catch {
     // Navegador con speechSynthesis presente pero fallando en runtime: se omite en silencio.
+    alTerminar?.();
   }
 }
 

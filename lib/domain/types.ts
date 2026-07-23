@@ -50,6 +50,25 @@ export type TipoModificador = "agregar" | "sin" | "sustituir";
 
 export type EstadoTurno = "abierto" | "cerrado";
 
+/**
+ * AGREGADO (Fase A, revision 2026-07-22 seccion 2.1 "cobrar-vs-enviar-a-cocina
+ * configurable"): modo de operacion de una `Ubicacion`, usado por
+ * backend-ventas-pos (lib/sales/engine.ts) para decidir CUANDO se permite
+ * cobrar un pedido relativo a cocina:
+ *  - "mostrador" (servicio de mostrador/contador, SIN meseros): se cobra
+ *    ANTES de enviar a cocina — flujo por DEFECTO para Chicken Kitchen (ver
+ *    docs/analisis-revision-20260722-modulos-innovacion-seguridad.md). El
+ *    pedido puede llegar a estado "cobrado" directamente desde "abierto"; de
+ *    ahi `enviarACocina` lo mete a la cola de cocina sin tocar ese estado ya
+ *    terminal (ver comentario largo en engine.ts).
+ *  - "mesa" (servicio a la mesa, CON meseros): se cobra AL FINAL, como en el
+ *    flujo clasico ya implementado (abierto -> enviadoCocina -> ... ->
+ *    entregado -> cobrado). Ambos modelos son reales segun los dos revisores
+ *    con experiencia operativa (mostrador puro vs. servicio a la mesa); NO se
+ *    elimina codigo del flujo "mesa", solo deja de ser el default.
+ */
+export type ModoOperacionUbicacion = "mostrador" | "mesa";
+
 export type TipoEventoAuditoria =
   | "descuentoAplicado"
   | "reembolso"
@@ -65,7 +84,11 @@ export type TipoEventoAuditoria =
   | "bajaEmpleado"
   | "cambioRolEmpleado"
   | "alertaAsistencia"
-  | "nominaGenerada";
+  | "nominaGenerada"
+  /** AGREGADO (Fase A, revision 2026-07-22 seccion 2.2): edicion de tarifa/hora de un Empleado ya existente (independiente de su rol). */
+  | "cambioTarifaEmpleado"
+  /** AGREGADO (Fase A, revision 2026-07-22 seccion 2.2): edicion de un HorarioTurno ya asignado (fecha/horas). */
+  | "cambioHorarioEmpleado";
 
 // ---------- Empleados / turnos de trabajo / asistencia (owner: rrhh-personal-pos) ----------
 // NOTA DE NOMBRES: `Turno` (arriba) es el turno DE CAJA/registradora (apertura/cierre Z).
@@ -189,7 +212,47 @@ export interface EstadoVerificacionFacial {
 }
 
 /**
- * Recibo de pago (paystub) — owner: nomina-pos.
+ * AGREGADO EN ETAPA 2 (seguridad de acceso, S-17 llamada 2026-07-22): estado
+ * de intentos de PIN fallidos por Usuario para el login de /login (owner:
+ * shell de UI / lib/auth). Mismo patron EXACTO que `EstadoVerificacionFacial`
+ * de arriba: vive en el store en memoria (Db.bloqueosPin, ver lib/db/store.ts),
+ * NO es un evento auditable, es estado transitorio de seguridad para el
+ * bloqueo temporal tras fallos consecutivos (ver lib/auth/bloqueoPin.ts).
+ * Se indexa por `usuarioId` (no por email): solo se crea/incrementa cuando el
+ * login ya resolvio un Usuario real contra el email ingresado (ver
+ * lib/auth/autenticacion.ts), igual que el bloqueo facial se indexa por
+ * `empleadoId` ya resuelto.
+ */
+export interface EstadoBloqueoPin {
+  usuarioId: string;
+  intentosFallidosConsecutivos: number;
+  /** ISO datetime hasta el cual el login por PIN esta bloqueado para este usuario; null = no bloqueado. */
+  bloqueadoHasta: string | null;
+}
+
+/**
+ * Reporte de horas trabajadas (nombre historico del tipo: "recibo de pago")
+ * — owner: nomina-pos.
+ *
+ * DECISION DE ALCANCE (S-17, ver `docs/requisitos.md` y
+ * `docs/analisis-revision-20260722-modulos-innovacion-seguridad.md`, llamada
+ * de revision 2026-07-22 con Diego Cataño y Mateo Franco, ambos con
+ * experiencia operativa real en restaurantes): el calculo real de tarifa por
+ * hora, el neto a pagar, y cualquier accion de "pagar" se RETIRAN del alcance
+ * de produccion del POS. Motivo: un error o manipulacion de tarifas dentro
+ * del POS puede generar pagos incorrectos sin los controles de un sistema de
+ * nomina/ERP dedicado ("normalmente la nomina arranca en el ERP", nunca en el
+ * POS — cita directa de un revisor). Este modulo ahora es SOLO un reporte de
+ * referencia (horas regulares/extra + propinas) para alimentar un sistema de
+ * nomina/ERP externo; ver `lib/nomina/calculo.ts`.
+ *
+ * `brutoCentavos`/`retencionCentavos`/`netoCentavos` se MANTIENEN en este
+ * tipo unicamente para no romper codigo existente que los referencia (riesgo
+ * de build con el plazo ajustado). YA NO se calculan — `correrNomina` siempre
+ * los deja en 0 — y NO deben mostrarse ni interpretarse como un pago real en
+ * ninguna UI. Si en el futuro se confirma que nada los lee, se pueden
+ * eliminar del tipo.
+ *
  * Dinero en CENTAVOS enteros (C-DINERO); horas en MINUTOS enteros (mismo
  * principio: nunca floats para cantidades que se suman/reportan).
  */
@@ -200,10 +263,14 @@ export interface ReciboDePago {
   periodoFin: string; // ISO date (YYYY-MM-DD), inclusive
   horasRegularesMin: number; // minutos enteros
   horasExtraMin: number; // minutos enteros
+  /** Propinas del periodo: dato de REFERENCIA para el ERP externo, no un pago calculado/emitido por este modulo. */
   propinasCentavos: number;
-  brutoCentavos: number; // salario (regular + extra), sin propinas
-  retencionCentavos: number; // retencion DEMO (ver lib/nomina/calculo.ts)
-  netoCentavos: number; // bruto - retencion + propinas
+  /** @deprecated Ya no se calcula (decision de alcance S-17): siempre 0. Se mantiene solo para no romper el tipo/build. NO usar como pago real. */
+  brutoCentavos: number;
+  /** @deprecated Ya no se calcula (decision de alcance S-17): siempre 0. Se mantiene solo para no romper el tipo/build. NO usar como pago real. */
+  retencionCentavos: number;
+  /** @deprecated Ya no se calcula (decision de alcance S-17): siempre 0. Se mantiene solo para no romper el tipo/build. NO usar como pago real. */
+  netoCentavos: number;
   generadoEn: string; // ISO datetime
 }
 
@@ -236,6 +303,15 @@ export interface Ubicacion {
    * fuerte por tienda, con aprovisionamiento/rotacion seguros).
    */
   secretoTotp: string;
+  /**
+   * AGREGADO (Fase A, revision 2026-07-22 seccion 2.1): ver `ModoOperacionUbicacion`.
+   * Default de la tienda piloto (Miami, ver lib/db/store.ts): "mostrador"
+   * (cobrar antes de enviar a cocina), por ser el modelo correcto de Chicken
+   * Kitchen (contador, sin meseros). La ubicacion demo de Austin se siembra en
+   * "mesa" a proposito, para poder demostrar/probar que ambos modos son
+   * reales y conviven en el mismo codigo.
+   */
+  modoOperacion: ModoOperacionUbicacion;
 }
 
 export interface ReglaDeImpuesto {
@@ -389,6 +465,67 @@ export interface Pedido {
    */
   entregadoEn: string | null;
   cerradoEn: string | null;
+  /**
+   * AGREGADO (Fase A, trazabilidad operativa de tiempos — 2026-07-22): id del
+   * `Usuario` que ABRIO/CREO este pedido en el mostrador (el "cajero que tomo
+   * la orden"), para el reporte de tiempos operativos (ver
+   * lib/reportes/tiempos.ts y app/reportes/tiempos) que permite resolver
+   * disputas de "quien causo la demora" y detectar patrones de cuello de
+   * botella por hora del dia.
+   *
+   * GAP DOCUMENTADO Y DECISION DE DISENO: `crearPedido` (lib/sales/engine.ts,
+   * owner backend-ventas-pos) NO recibe ni fija este campo — ese archivo esta
+   * fuera del alcance editable de esta tarea (Fase A, ver restricciones de la
+   * tarea). En su lugar, se estampa en la capa de ruta API (POST
+   * /api/v1/pedidos, ver app/api/v1/pedidos/route.ts) mutando el MISMO objeto
+   * `Pedido` que `crearPedido` ya devolvio y empujo a `getDb().pedidos`
+   * (misma referencia en memoria) — no requiere tocar el motor de ventas.
+   *
+   * OPCIONAL a proposito (a diferencia de los demas campos de este contrato,
+   * que son requeridos): asi los fixtures `Pedido` de pruebas/otras tareas
+   * paralelas que construyen el objeto a mano (lib/sales/__tests__/*,
+   * lib/kitchen/kds.test.ts, components/pos/__tests__/api.test.ts — ninguno
+   * editable por esta tarea) siguen compilando sin declarar este campo nuevo.
+   * `undefined`/`null` = pedido legado/sembrado sin creador registrado, o
+   * creado por un cliente que todavia no envia `usuarioId` en el body (ver
+   * limitacion documentada en el reporte de la tarea: el cliente de POS,
+   * components/pos/api.ts y app/pos/nuevo, esta fuera del alcance editable de
+   * esta tarea y AUN NO se actualizo para enviar ese campo).
+   */
+  creadoPorUsuarioId?: string | null;
+  /**
+   * AGREGADO (Fase A, revision 2026-07-22 seccion 2.6-parcial "empaque
+   * automatico en para llevar"): true si el cajero marco este pedido como
+   * "para llevar" (fulfillment del cliente), independiente de `canal` (que es
+   * el ORIGEN del pedido — mostrador/kiosco/online/etc — no como se entrega).
+   * Ver `marcarParaLlevar` en lib/sales/engine.ts: al pasar de false->true
+   * agrega automaticamente el cargo de empaque (`empaqueTotal`) sin que el
+   * cajero tenga que acordarse de hacerlo aparte.
+   *
+   * OPCIONAL (mismo criterio que `creadoPorUsuarioId` arriba): asi los
+   * fixtures `Pedido` de otras tareas paralelas que construyen el objeto a
+   * mano (lib/kitchen/kds.test.ts, components/pos/__tests__/api.test.ts,
+   * ninguno editable por esta tarea) siguen compilando sin declarar este
+   * campo. `undefined` se trata igual que `false` en todo el codigo nuevo.
+   */
+  paraLlevar?: boolean;
+  /**
+   * AGREGADO (Fase A, misma seccion 2.6-parcial): cargo plano de empaque en
+   * CENTAVOS (C-DINERO), fijado por `marcarParaLlevar` cuando `paraLlevar`
+   * pasa a true (0 en caso contrario). DECISION DE DISENO: se modela como un
+   * cargo de orden aparte (sumado en `total`, ver formula documentada al
+   * inicio de lib/sales/engine.ts) en vez de como una `LineaDePedido` con un
+   * `Producto` real de catalogo, para no tener que dar de alta un SKU de
+   * empaque en el catalogo (owner: menu-inventario-pos, fuera del alcance de
+   * esta tarea) ni tocar `lib/data/catalog.ts`. Simplificacion de DEMO: en
+   * produccion probablemente se modelaria como una linea de producto real
+   * (para reportar consumo de insumos de empaque) y habria que confirmar con
+   * finanzas si es gravable en cada jurisdiccion (mismo tipo de duda que
+   * `ReglaDeImpuesto.aplicaAExentos`); aqui se trata como NO gravable.
+   * OPCIONAL por el mismo motivo que `paraLlevar` arriba; `undefined` se
+   * trata igual que `0`.
+   */
+  empaqueTotal?: number;
 }
 
 export interface Pago {

@@ -17,9 +17,23 @@
  * hasta que rote. Hace poll cada 1s; el servidor sigue siendo la fuente de
  * verdad del codigo y de los segundos restantes (evita depender del reloj
  * del dispositivo).
+ *
+ * AGREGADO (Fase A, idea de innovacion de la llamada de revision 2026-07-22:
+ * "QR rotativo para clock-in, reutiliza el TOTP ya construido"): ademas de
+ * los 6 digitos, un boton deja alternar a una vista de codigo QR que codifica
+ * el MISMO codigo TOTP vigente (como URL /jornada/marcar?codigo=XXXXXX, que
+ * precarga el campo de codigo en el celular del empleado, ver
+ * app/jornada/marcar/page.tsx). Esto NO agrega un segundo mecanismo de
+ * rotacion: el QR se regenera en el mismo efecto que ya observa `codigo`
+ * (poblado por el poll de 1s de arriba), asi que rota exactamente cuando el
+ * TOTP rota (cada 10s) — un solo timer, dos representaciones del mismo valor.
+ * Motivo de negocio (hallazgo de la llamada): Face ID no esta disponible en
+ * todos los telefonos y el geofencing por GPS es poco confiable/genera
+ * friccion; escanear un QR es una alternativa universal a digitar 6 numeros.
  */
 
 import { useEffect, useState } from "react";
+import QRCode from "qrcode";
 import { useI18n } from "@/lib/shell/I18nProvider";
 import { textoErrorApi } from "@/lib/i18n/erroresApi";
 import { listarUbicaciones } from "@/components/empleados/api";
@@ -36,6 +50,9 @@ export default function PantallaJornadaPage() {
   const [codigo, setCodigo] = useState<string | null>(null);
   const [segundosRestantes, setSegundosRestantes] = useState<number>(PERIODO_TOTP_SEG);
   const [error, setError] = useState<string | null>(null);
+  // Vista: digitos (default, igual que antes) o codigo QR del mismo valor.
+  const [modoQr, setModoQr] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   // Resuelve la ubicacion una sola vez (demo: la primera tienda activa; en
   // produccion la tablet vendria pre-aprovisionada con su ubicacionId fijo).
@@ -80,6 +97,31 @@ export default function PantallaJornadaPage() {
     };
   }, [ubicacion, t]);
 
+  // Regenera la imagen QR CADA VEZ que `codigo` cambia (es decir, cada vez
+  // que el TOTP rota, cada 10s) — no es un timer nuevo, es un efecto derivado
+  // del mismo estado que ya puebla el poll de 1s de arriba. Codifica una URL
+  // completa (no solo el codigo pelado) para que cualquier lector de QR /
+  // camara del celular pueda abrirla directo en /jornada/marcar con el campo
+  // de codigo precargado.
+  useEffect(() => {
+    if (!codigo || typeof window === "undefined") {
+      setQrDataUrl(null);
+      return;
+    }
+    let vivo = true;
+    const valor = `${window.location.origin}/jornada/marcar?codigo=${codigo}`;
+    QRCode.toDataURL(valor, { margin: 1, width: 320, color: { dark: "#111827", light: "#ffffff" } })
+      .then((dataUrl) => {
+        if (vivo) setQrDataUrl(dataUrl);
+      })
+      .catch(() => {
+        if (vivo) setQrDataUrl(null);
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [codigo]);
+
   const progreso = segundosRestantes / PERIODO_TOTP_SEG;
   const dashOffset = CIRCUNFERENCIA * (1 - progreso);
   const digitos = (codigo ?? "------").split("");
@@ -114,19 +156,46 @@ export default function PantallaJornadaPage() {
           <span className="text-5xl font-black text-ck-gold">{segundosRestantes}</span>
         </div>
 
-        <div className="mb-6 flex justify-center gap-2 sm:gap-3">
-          {digitos.map((d, i) => (
-            <div
-              key={i}
-              className="grid h-16 w-12 place-items-center rounded-xl bg-neutral-900 text-4xl font-black tabular-nums sm:h-20 sm:w-16 sm:text-5xl"
-            >
-              {d}
-            </div>
-          ))}
-        </div>
+        {modoQr ? (
+          <div className="mb-6 flex justify-center">
+            {qrDataUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- data URI generado en el cliente, no un asset optimizable por next/image.
+              <img
+                src={qrDataUrl}
+                alt={t("jornada.pantalla.qrAlt")}
+                width={220}
+                height={220}
+                className="rounded-2xl border-4 border-neutral-800 bg-white p-2"
+              />
+            ) : (
+              <div className="grid h-[220px] w-[220px] place-items-center rounded-2xl border-4 border-neutral-800 bg-neutral-900 text-sm text-neutral-500">
+                {t("jornada.pantalla.cargando")}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="mb-6 flex justify-center gap-2 sm:gap-3">
+            {digitos.map((d, i) => (
+              <div
+                key={i}
+                className="grid h-16 w-12 place-items-center rounded-xl bg-neutral-900 text-4xl font-black tabular-nums sm:h-20 sm:w-16 sm:text-5xl"
+              >
+                {d}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setModoQr((v) => !v)}
+          className="mb-4 rounded-full border border-neutral-700 px-4 py-2 text-xs font-bold uppercase tracking-wide text-neutral-300 transition hover:border-ck-gold hover:text-ck-gold"
+        >
+          {modoQr ? t("jornada.pantalla.verDigitos") : t("jornada.pantalla.verQr")}
+        </button>
 
         <p className="mx-auto max-w-md text-sm text-neutral-400">
-          {t("jornada.pantalla.instruccion")}
+          {modoQr ? t("jornada.pantalla.instruccionQr") : t("jornada.pantalla.instruccion")}
         </p>
 
         {error && <p className="mt-4 text-sm font-semibold text-ck-red">{error}</p>}

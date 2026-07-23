@@ -278,7 +278,26 @@ export function editarEmpleado(empleadoId: string, cambios: EditarEmpleadoInput)
         422
       );
     }
-    empleado.tarifaHoraCentavos = cambios.tarifaHoraCentavos;
+    const tarifaAnterior = empleado.tarifaHoraCentavos;
+    if (cambios.tarifaHoraCentavos !== tarifaAnterior) {
+      empleado.tarifaHoraCentavos = cambios.tarifaHoraCentavos;
+
+      // Cambio de tarifa por hora: accion sensible de RRHH (permite pagar
+      // distinto a dos empleados con el MISMO rol, ej. cubren posiciones
+      // distintas) -- se registra igual que el cambio de rol, mismo criterio
+      // de "usuarioId" (el Usuario de login del propio empleado, ver
+      // comentario en el bloque de cambioRolEmpleado arriba: esta demo
+      // todavia no propaga el usuario gerente que hizo el cambio).
+      registrarEvento({
+        ubicacionId: empleado.ubicacionId,
+        usuarioId: empleado.usuarioId,
+        tipo: "cambioTarifaEmpleado",
+        agregadoTipo: "Empleado",
+        agregadoId: empleado.id,
+        motivo: `Cambio de tarifa por hora: ${tarifaAnterior} -> ${cambios.tarifaHoraCentavos} (centavos)`,
+        payload: { tarifaAnteriorCentavos: tarifaAnterior, tarifaNuevaCentavos: cambios.tarifaHoraCentavos },
+      });
+    }
   }
   if (cambios.rolId !== undefined && cambios.rolId !== rolAnterior) {
     validarRol(cambios.rolId);

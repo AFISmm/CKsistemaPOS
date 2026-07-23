@@ -72,9 +72,27 @@ export default function ReportesPage() {
             {t("reportes.inicio")}
           </Link>
         </div>
-        <p className="mb-6 text-sm text-neutral-600 dark:text-neutral-400">
+        <p className="mb-2 text-sm text-neutral-600 dark:text-neutral-400">
           {t("reportes.subtitulo")}
         </p>
+        {/* Fase A (revision 2026-07-22, seccion 6.1): reporte historico de
+            trazabilidad de tiempos por pedido (quien lo tomo, cuando entro/
+            salio de cocina), separado de este resumen en vivo del dia. */}
+        <Link
+          href="/reportes/tiempos"
+          className="mb-2 inline-block text-sm font-semibold text-ck-red underline dark:text-red-400"
+        >
+          {t("reportes.verTiempos")}
+        </Link>
+        {/* Fase A (revision 2026-07-22, "autorizacion de anulacion":
+            registro de patrones por empleado): anulaciones y reembolsos
+            agrupados por empleado, para deteccion de fraude/abuso. */}
+        <Link
+          href="/reportes/anulaciones"
+          className="mb-6 block text-sm font-semibold text-ck-red underline dark:text-red-400"
+        >
+          {t("reportes.verAnulaciones")}
+        </Link>
 
         {error && (
           <div className="mb-4 rounded-lg bg-red-100 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">

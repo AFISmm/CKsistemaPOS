@@ -26,6 +26,15 @@
  *    la pantalla central de la tienda (GET /api/v1/jornada/codigo) y
  *    (b) validar el codigo que el empleado escribe en su celular
  *    (POST /api/v1/jornada/marcar).
+ *
+ * AGREGADO (Fase A, revision 2026-07-22 — "autorizacion remota" / codigo
+ * gerencial diario): `generarCodigoVigente`/`validarCodigo` ahora aceptan un
+ * `periodoSeg` opcional (por defecto `PERIODO_TOTP_SEG`, 10s, EXACTAMENTE el
+ * mismo comportamiento que antes para todo el codigo existente de jornada que
+ * no pasa ese argumento). Esto permite que lib/jornada/codigoGerencial.ts
+ * REUSE este mismo algoritmo HOTP con un periodo de 86400s (1 dia) para un
+ * codigo de autorizacion gerencial, en vez de escribir una segunda
+ * implementacion de TOTP. Ver ese archivo para el detalle.
  */
 
 import { createHmac } from "crypto";
@@ -37,9 +46,10 @@ const DIGITOS_TOTP = 6;
 /** HOTP (RFC 4226): HMAC-SHA1 sobre un contador de 8 bytes big-endian, truncamiento dinamico a 6 digitos. */
 function hotp(secreto: string, contador: number): string {
   const buffer = Buffer.alloc(8);
-  // El contador de 10s-en-10s cabe holgadamente en 32 bits durante la vida
-  // de esta demo; se escribe en los 4 bytes bajos del buffer de 8 bytes que
-  // exige HOTP.
+  // El contador (ya sea de 10s-en-10s para jornada, o de 1-dia-en-1-dia para
+  // el codigo gerencial, ver lib/jornada/codigoGerencial.ts) cabe holgadamente
+  // en 32 bits durante la vida de esta demo; se escribe en los 4 bytes bajos
+  // del buffer de 8 bytes que exige HOTP.
   buffer.writeUInt32BE(0, 0);
   buffer.writeUInt32BE(contador >>> 0, 4);
 
@@ -55,8 +65,8 @@ function hotp(secreto: string, contador: number): string {
   return codigo.toString().padStart(DIGITOS_TOTP, "0");
 }
 
-function contadorDeInstante(epochMs: number): number {
-  return Math.floor(epochMs / 1000 / PERIODO_TOTP_SEG);
+function contadorDeInstante(epochMs: number, periodoSeg: number): number {
+  return Math.floor(epochMs / 1000 / periodoSeg);
 }
 
 export interface CodigoTotpVigente {
@@ -65,28 +75,58 @@ export interface CodigoTotpVigente {
   segundosRestantes: number;
 }
 
-/** Codigo TOTP vigente ahora mismo para el secreto de una ubicacion, + segundos hasta que rote. */
+/**
+ * Codigo TOTP vigente ahora mismo para un secreto dado, + segundos hasta que
+ * rote. `periodoSeg` por defecto es el de jornada (10s); el codigo gerencial
+ * diario (lib/jornada/codigoGerencial.ts) le pasa 86400.
+ */
 export function generarCodigoVigente(
   secreto: string,
-  ahoraMs: number = Date.now()
+  ahoraMs: number = Date.now(),
+  periodoSeg: number = PERIODO_TOTP_SEG
 ): CodigoTotpVigente {
-  const contador = contadorDeInstante(ahoraMs);
+  const contador = contadorDeInstante(ahoraMs, periodoSeg);
   const codigo = hotp(secreto, contador);
-  const segundosDentroDeVentana = Math.floor(ahoraMs / 1000) % PERIODO_TOTP_SEG;
-  const segundosRestantes = PERIODO_TOTP_SEG - segundosDentroDeVentana;
+  const segundosDentroDeVentana = Math.floor(ahoraMs / 1000) % periodoSeg;
+  const segundosRestantes = periodoSeg - segundosDentroDeVentana;
   return { codigo, segundosRestantes };
 }
 
+export interface OpcionesValidarCodigo {
+  /** Igual que en generarCodigoVigente: por defecto el de jornada (10s). */
+  periodoSeg?: number;
+  /**
+   * Cuantas ventanas HACIA ATRAS se toleran ademas de la actual (por defecto
+   * 1, el comportamiento historico de jornada: contador actual + el
+   * inmediatamente anterior, para no ser estricto con la latencia entre leer
+   * el codigo en la pantalla central y enviarlo desde el celular). El codigo
+   * gerencial diario pasa 0 (sin tolerancia retroactiva: solo el codigo de
+   * HOY es valido, no el de ayer) porque ahi no hay excusa de latencia de red
+   * de unos segundos — es un codigo que un gerente dicta/lee una vez al dia.
+   */
+  ventanasAtras?: number;
+}
+
 /**
- * Valida un codigo TOTP tolerando 1 ventana de desfase hacia atras (el
- * contador actual y el inmediatamente anterior), para no ser demasiado
+ * Valida un codigo TOTP tolerando `ventanasAtras` ventanas de desfase hacia
+ * atras (por defecto 1, ver OpcionesValidarCodigo), para no ser demasiado
  * estricto con la latencia entre "el empleado lee el codigo de la pantalla
  * central" y "lo envia desde su celular" (red movil, escritura manual, etc).
  */
-export function validarCodigo(secreto: string, codigo: string, ahoraMs: number = Date.now()): boolean {
+export function validarCodigo(
+  secreto: string,
+  codigo: string,
+  ahoraMs: number = Date.now(),
+  opciones: OpcionesValidarCodigo = {}
+): boolean {
   const codigoLimpio = (codigo ?? "").trim();
   if (!/^\d{6}$/.test(codigoLimpio)) return false;
 
-  const contadorActual = contadorDeInstante(ahoraMs);
-  return [contadorActual, contadorActual - 1].some((c) => hotp(secreto, c) === codigoLimpio);
+  const periodoSeg = opciones.periodoSeg ?? PERIODO_TOTP_SEG;
+  const ventanasAtras = opciones.ventanasAtras ?? 1;
+  const contadorActual = contadorDeInstante(ahoraMs, periodoSeg);
+  for (let i = 0; i <= ventanasAtras; i++) {
+    if (hotp(secreto, contadorActual - i) === codigoLimpio) return true;
+  }
+  return false;
 }

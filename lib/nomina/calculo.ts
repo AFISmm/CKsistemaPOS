@@ -1,5 +1,15 @@
 /**
- * Calculo de nomina — DUENO: nomina-pos.
+ * Reporte de horas (antes "calculo de nomina") — DUENO: nomina-pos.
+ *
+ * DECISION DE ALCANCE (S-17, ver docs/requisitos.md y
+ * docs/analisis-revision-20260722-modulos-innovacion-seguridad.md): tras la
+ * llamada de revision del 2026-07-22 (dos revisores con experiencia operativa
+ * real en restaurantes, Diego Cataño y Mateo Franco), se RETIRA del alcance
+ * de produccion del POS el calculo real de tarifa por hora, el neto a pagar
+ * y cualquier accion de "pagar". Motivo: un error o manipulacion de tarifas
+ * dentro del POS puede generar pagos incorrectos sin los controles de un
+ * sistema de nomina/ERP dedicado ("normalmente la nomina arranca en el ERP",
+ * nunca en el POS). Este modulo es ahora SOLO un reporte de referencia.
  *
  * Consume la asistencia que produce rrhh-personal-pos (lib/rrhh/asistencia.ts:
  * `listarMarcajes` + `emparejarIntervalos`) y NO gestiona altas/bajas/roles de
@@ -9,9 +19,13 @@
  *  2) separa horas regulares vs. extra con la regla DEMO ">40h/semana = extra"
  *     (estilo FLSA federal; NO se modelan reglas estatales de horas extra
  *     diarias ni las reglas reales de FL/TX — a validar con nomina/legal),
- *  3) suma las propinas ya registradas por pagos-pos/backend-ventas-pos
- *     durante los turnos de caja que abrio el Usuario ligado al empleado,
- *  4) aplica una retencion DEMO FICTICIA y genera el ReciboDePago (paystub).
+ *  3) suma, solo como dato de REFERENCIA, las propinas ya registradas por
+ *     pagos-pos/backend-ventas-pos durante los turnos de caja que abrio el
+ *     Usuario ligado al empleado,
+ *  4) genera un `ReciboDePago` (reporte de horas) que NO calcula tarifa,
+ *     retencion ni neto a pagar (esos campos se dejan en 0 por compatibilidad
+ *     de tipo, ver lib/domain/types.ts). Este reporte esta pensado para
+ *     alimentar un sistema de nomina/ERP externo, no para pagar desde aqui.
  *
  * C-DINERO: todo monto en CENTAVOS enteros. Horas en MINUTOS enteros.
  */
@@ -24,17 +38,6 @@ import { ErrorNomina } from "./errores";
 
 /** Regla DEMO (FLSA-like): mas de 40h/semana = hora extra. FL y TX no tienen regla estatal de horas extra diaria, por eso se aplica igual en ambos estados. */
 export const LIMITE_HORAS_REGULARES_SEMANA_MIN = 40 * 60;
-
-/** Multiplicador DEMO de hora extra (tiempo y medio). */
-export const FACTOR_HORA_EXTRA = 1.5;
-
-/**
- * Retencion federal DEMO/FICTICIA (no es una tasa real del IRS ni de ningun
- * estado). FL y TX NO tienen impuesto estatal sobre ingreso personal, por eso
- * la retencion aqui simula UNICAMENTE una porcion federal generica. Confirmar
- * con nomina/legal real antes de usar en produccion.
- */
-export const TASA_RETENCION_FEDERAL_DEMO = 0.1;
 
 function validarFechaISO(valor: string | undefined, campo: string): string {
   if (!valor || !/^\d{4}-\d{2}-\d{2}$/.test(valor)) {
@@ -115,7 +118,11 @@ export interface CorrerNominaInput {
   empleadoId?: string;
 }
 
-/** Genera (y persiste) un ReciboDePago por empleado para el periodo dado. */
+/**
+ * Genera (y persiste) un ReciboDePago (reporte de horas) por empleado para
+ * el periodo dado. NO calcula tarifa/hora ni neto a pagar (decision de
+ * alcance S-17): solo horas regulares/extra y propinas de referencia.
+ */
 export function correrNomina(input: CorrerNominaInput): ReciboDePago[] {
   const periodoInicio = validarFechaISO(input.periodoInicio, "periodoInicio");
   const periodoFin = validarFechaISO(input.periodoFin, "periodoFin");
@@ -149,16 +156,16 @@ export function correrNomina(input: CorrerNominaInput): ReciboDePago[] {
 
   for (const empleado of empleadosObjetivo) {
     const { regularesMin, extraMin } = desglosarHoras(empleado.id, desde, hasta);
+    // Propinas: dato de REFERENCIA para el ERP externo (ver README-DEMO.md
+    // "Decision de modelado: como se ligan propinas a un empleado"), NO un
+    // pago calculado/emitido por este modulo.
     const propinasCentavos = propinasDelPeriodo(empleado.usuarioId, desde, hasta);
 
-    const pagoRegular = Math.round((regularesMin / 60) * empleado.tarifaHoraCentavos);
-    const pagoExtra = Math.round(
-      (extraMin / 60) * empleado.tarifaHoraCentavos * FACTOR_HORA_EXTRA
-    );
-    const brutoCentavos = pagoRegular + pagoExtra;
-    const retencionCentavos = Math.round(brutoCentavos * TASA_RETENCION_FEDERAL_DEMO);
-    const netoCentavos = brutoCentavos - retencionCentavos + propinasCentavos;
-
+    // NO se calcula tarifa/hora, bruto, retencion ni neto (decision de
+    // alcance S-17): esos campos se dejan en 0 unicamente por compatibilidad
+    // de tipo (ver lib/domain/types.ts). `empleado.tarifaHoraCentavos` sigue
+    // existiendo para rrhh-personal-pos (edicion de tarifa por persona) pero
+    // este modulo deliberadamente no la usa para calcular un pago.
     const recibo: ReciboDePago = {
       id: uid(),
       empleadoId: empleado.id,
@@ -167,9 +174,9 @@ export function correrNomina(input: CorrerNominaInput): ReciboDePago[] {
       horasRegularesMin: regularesMin,
       horasExtraMin: extraMin,
       propinasCentavos,
-      brutoCentavos,
-      retencionCentavos,
-      netoCentavos,
+      brutoCentavos: 0,
+      retencionCentavos: 0,
+      netoCentavos: 0,
       generadoEn: ahora(),
     };
 
@@ -182,15 +189,12 @@ export function correrNomina(input: CorrerNominaInput): ReciboDePago[] {
       tipo: "nominaGenerada",
       agregadoTipo: "ReciboDePago",
       agregadoId: recibo.id,
-      motivo: `Nomina ${periodoInicio} a ${periodoFin} (DEMO)`,
+      motivo: `Reporte de horas ${periodoInicio} a ${periodoFin} (DEMO, sin calculo de pago — S-17)`,
       payload: {
         empleadoId: empleado.id,
         horasRegularesMin: regularesMin,
         horasExtraMin: extraMin,
         propinasCentavos,
-        brutoCentavos,
-        retencionCentavos,
-        netoCentavos,
       },
     });
   }

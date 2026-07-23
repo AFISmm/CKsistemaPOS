@@ -16,6 +16,7 @@ import type {
   Categoria,
   Combo,
   Empleado,
+  EstadoBloqueoPin,
   EstadoVerificacionFacial,
   EventoDeAuditoria,
   GrupoModificador,
@@ -39,7 +40,11 @@ import type {
   Ubicacion,
   Usuario,
 } from "../domain/types";
-import { getSeedCatalogo } from "../data/catalog";
+// Catalogo real (Fase A, 2026-07-22): reemplaza al catalogo DEMO fabricado de
+// lib/data/catalog.ts (que queda en el repo solo como referencia/fallback, ya
+// no se usa aqui) por datos reales importados de Recetario_Simplificado.xlsx.
+// Ver lib/data/catalog-real.ts y scripts/importar-recetario.js.
+import { getSeedCatalogo } from "../data/catalog-real";
 import { getSeedRrhh, usuariosAdicionalesRrhh } from "../data/rrhh-seed";
 import { Redis } from "@upstash/redis";
 
@@ -68,6 +73,8 @@ export interface Db {
   recibosPago: ReciboDePago[];
   // ---- Chequeo de inicio de jornada: TOTP + verificacion facial (owner: rrhh-personal-pos, etapa 2) ----
   bloqueosVerificacionFacial: EstadoVerificacionFacial[];
+  // ---- Seguridad de acceso (Fase A, revision 2026-07-22): bloqueo por intentos fallidos de PIN, ver lib/auth/bloqueoPin.ts ----
+  bloqueosPin: EstadoBloqueoPin[];
   // ---- Shell de UI (owner: etapa 1 de este proyecto) ----
   notificaciones: Notificacion[];
   seeded: boolean;
@@ -125,6 +132,7 @@ function crearDbVacia(): Db {
     marcajes: [],
     recibosPago: [],
     bloqueosVerificacionFacial: [],
+    bloqueosPin: [],
     notificaciones: [],
     seeded: false,
   };
@@ -150,6 +158,10 @@ function sembrar(db: Db): void {
       // DEMO: secreto TOTP fijo (etapa 2, ver lib/jornada/totp.ts). Produccion:
       // secreto aleatorio fuerte, aprovisionado/rotado de forma segura por tienda.
       secretoTotp: "demo-totp-secret-mia-72nd-st-v1",
+      // Fase A (revision 2026-07-22 seccion 2.1): tienda piloto = mostrador
+      // (contador, sin meseros) -> cobrar ANTES de enviar a cocina, ver
+      // lib/sales/engine.ts.
+      modoOperacion: "mostrador",
     },
     {
       id: "ubic-austin-tx",
@@ -161,6 +173,10 @@ function sembrar(db: Db): void {
       moneda: "USD",
       activo: true,
       secretoTotp: "demo-totp-secret-austin-v1",
+      // Ubicacion demo sembrada en "mesa" A PROPOSITO: demuestra que el flujo
+      // clasico (cobrar despues de cocina) sigue siendo un camino real y
+      // funcional, no solo codigo muerto (ver lib/sales/engine.ts).
+      modoOperacion: "mesa",
     }
   );
 
@@ -284,15 +300,28 @@ function sembrar(db: Db): void {
   );
 
   // Catalogo (owner: menu-inventario-pos)
+  //
+  // FIX (Fase A, 2026-07-22, encontrado al escribir pruebas de auto-86 — ver
+  // reporte de la tarea): `getSeedCatalogo()` devuelve arrays de objetos
+  // literales definidos UNA sola vez a nivel de modulo (ver
+  // lib/data/catalog-recetario.generado.ts / lib/data/catalog.ts), asi que
+  // sin clonar, cada llamada a `sembrar()` empujaba las MISMAS instancias de
+  // objeto a `db.*`. Como `Producto.disponible86` (entre otros campos) se
+  // MUTA en sitio (ver marcar86 / verificarAuto86PorInsumo en
+  // lib/inventory/inventario.ts), esas mutaciones quedaban "pegadas" al
+  // objeto semilla compartido: `resetDb()` NO devolvia de verdad el producto
+  // a su estado sembrado original entre resets (ej. un producto marcado 86
+  // seguia 86 despues de "reiniciar la demo"). `structuredClone` asegura que
+  // cada `sembrar()` parta de instancias nuevas e independientes.
   const cat = getSeedCatalogo();
-  db.categorias.push(...cat.categorias);
-  db.productos.push(...cat.productos);
-  db.combos.push(...cat.combos);
-  db.gruposModificador.push(...cat.gruposModificador);
-  db.modificadores.push(...cat.modificadores);
-  db.insumos.push(...cat.insumos);
-  db.recetas.push(...cat.recetas);
-  db.recetaInsumos.push(...cat.recetaInsumos);
+  db.categorias.push(...structuredClone(cat.categorias));
+  db.productos.push(...structuredClone(cat.productos));
+  db.combos.push(...structuredClone(cat.combos));
+  db.gruposModificador.push(...structuredClone(cat.gruposModificador));
+  db.modificadores.push(...structuredClone(cat.modificadores));
+  db.insumos.push(...structuredClone(cat.insumos));
+  db.recetas.push(...structuredClone(cat.recetas));
+  db.recetaInsumos.push(...structuredClone(cat.recetaInsumos));
   for (const s of cat.stockInicial) {
     db.stock.push({
       id: uid(),

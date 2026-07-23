@@ -7,7 +7,7 @@
  * dominio importados con `import type`.
  */
 
-import type { Categoria, Producto } from "@/lib/domain/types";
+import type { Categoria, Insumo, Producto, Receta, RecetaInsumo } from "@/lib/domain/types";
 
 const BASE_URL = "/api/v1";
 
@@ -111,4 +111,46 @@ export async function marcar86Producto(id: string, disponible: boolean, usuarioI
     body: JSON.stringify({ disponible, usuarioId }),
   });
   return producto;
+}
+
+// ---------------------------------------------------------------------------
+// Edicion de receta (RecetaInsumo) de un producto — AGREGADO Fase A (2026-07-22).
+// ---------------------------------------------------------------------------
+
+export interface RecetaInsumoConNombre extends RecetaInsumo {
+  nombreInsumo: string;
+  unidadMedida: string;
+}
+
+export interface RecetaDeProducto {
+  productoId: string;
+  receta: Receta | null;
+  items: RecetaInsumoConNombre[];
+}
+
+export interface ItemRecetaBody {
+  insumoId: string;
+  cantidad: number;
+}
+
+/** GET /api/v1/productos/[id]/receta */
+export async function obtenerRecetaProducto(productoId: string): Promise<RecetaDeProducto> {
+  return solicitar<RecetaDeProducto>(`/productos/${productoId}/receta`);
+}
+
+/** PUT /api/v1/productos/[id]/receta — reemplaza la lista completa de ingredientes. */
+export async function guardarRecetaProducto(
+  productoId: string,
+  items: ItemRecetaBody[]
+): Promise<RecetaDeProducto> {
+  return solicitar<RecetaDeProducto>(`/productos/${productoId}/receta`, {
+    method: "PUT",
+    body: JSON.stringify({ items }),
+  });
+}
+
+/** GET /api/v1/insumos — catalogo de insumos, para el selector de ingredientes. */
+export async function listarInsumos(): Promise<Insumo[]> {
+  const { insumos } = await solicitar<{ insumos: Insumo[] }>("/insumos");
+  return insumos;
 }

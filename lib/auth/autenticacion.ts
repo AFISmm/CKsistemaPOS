@@ -25,11 +25,19 @@
  * pinHash de ESE Usuario. Por seguridad basica (incluso en demo), el error
  * es siempre el mismo mensaje generico sin importar cual de las tres cosas
  * fallo (correo no existe / empleado sin usuarioId / PIN incorrecto).
+ *
+ * BLOQUEO POR INTENTOS FALLIDOS (agregado en Fase A, revision 2026-07-22,
+ * plan de seguridad para produccion): 3 intentos de PIN fallidos consecutivos
+ * para el MISMO Usuario bloquean el login por PIN 5 minutos (ver
+ * lib/auth/bloqueoPin.ts, mismo patron y mismos numeros que el bloqueo de
+ * verificacion facial de lib/jornada/bloqueo.ts). Antes de este cambio no
+ * habia ningun limite: se podian probar PINs de 4 digitos indefinidamente.
  */
 
 import { getDb } from "@/lib/db/store";
 import type { Rol, Usuario } from "@/lib/domain/types";
 import { obtenerEmpleadoPorEmail } from "@/lib/rrhh/empleados";
+import { bloqueadoHastaPin, registrarIntentoFallidoPin, reiniciarIntentosPin } from "./bloqueoPin";
 import { ErrorAuth } from "./errores";
 
 /** Usuario sin el campo `pinHash` (nunca se debe exponer al cliente). */
@@ -86,10 +94,33 @@ export function iniciarSesion(email: string, pin: string): { usuario: UsuarioSin
     ? getDb().usuarios.find((u) => u.id === empleado.usuarioId && u.activo)
     : undefined;
 
+  // Bloqueo por intentos fallidos: se consulta ANTES de comparar el PIN, y
+  // rechaza incluso si el PIN enviado en ESTE intento es el correcto (el
+  // bloqueo aplica al metodo completo por 5 minutos, no solo a los intentos
+  // incorrectos que lo activaron) — mismo criterio que
+  // lib/jornada/marcaje.ts (marcarPorFacial) con el bloqueo facial.
+  if (usuario) {
+    const bloqueo = bloqueadoHastaPin(usuario.id);
+    if (bloqueo) {
+      throw new ErrorAuth(
+        "pin_bloqueado_temporalmente",
+        "Demasiados intentos fallidos. Tu acceso por PIN esta bloqueado temporalmente; intenta de nuevo en unos minutos.",
+        423
+      );
+    }
+  }
+
   if (!usuario || usuario.pinHash !== `demo:${pinLimpio}`) {
+    // Solo se cuenta como "intento fallido" contra el bloqueo cuando SI habia
+    // un Usuario real contra el que comparar el PIN (ver nota de tradeoff de
+    // enumeracion en lib/auth/bloqueoPin.ts): un correo inexistente nunca
+    // acumula ni dispara bloqueo, porque no hay nada que proteger de fuerza
+    // bruta todavia.
+    if (usuario) registrarIntentoFallidoPin(usuario.id);
     throw new ErrorAuth("credenciales_invalidas", "Correo o PIN incorrectos.", 401);
   }
 
+  reiniciarIntentosPin(usuario.id);
   return { usuario: sinPin(usuario), rol: rolDe(usuario.rolId) };
 }
 

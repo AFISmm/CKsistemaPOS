@@ -165,3 +165,41 @@ export function subitemsVisiblesDelModulo(
 ): SubItemNavegacion[] {
   return (modulo.subitems ?? []).filter((s) => subitemVisible(s, modulo.permiso, rol));
 }
+
+/**
+ * FASE A (revision 2026-07-22, seccion 2.5 "saltar el sidebar para roles de
+ * un solo modulo"): hallazgo real de la llamada de revision — si un usuario
+ * logueado solo tiene permiso para UN modulo de negocio (ademas de "/"
+ * Inicio, que es especial), debe aterrizar DIRECTO en la pantalla de ese
+ * modulo al iniciar sesion, sin ver el sidebar ni el dashboard de tarjetas de
+ * "/" (ver components/shell/AppShell.tsx, que consume las dos funciones de
+ * abajo para decidir el bypass; app/page.tsx es ese dashboard de tarjetas).
+ *
+ * REGLA DE CONTEO, EXPLICITA A PROPOSITO (facil de errar por un off-by-one):
+ * "/" (Inicio) NUNCA cuenta como uno de los modulos para este calculo, sin
+ * importar que `modulosVisiblesParaRol` SI lo incluya en la lista que pinta
+ * el Sidebar (permiso `null` = siempre visible, ver arriba). Es decir: un
+ * rol-cajero (permiso unico "pedido.crear") tiene, para este calculo,
+ * EXACTAMENTE 1 modulo "real" ("/pos") — no 2. Un rol-gerente (con
+ * "pedido.crear" + "empleados.gestionar"/"nomina.ver" + "menu.gestionar" +
+ * "cocina.actualizarEstado", ver PERMISOS_GERENCIALES en lib/db/store.ts)
+ * tiene 3+ modulos reales y por lo tanto NUNCA activa este bypass: sigue
+ * viendo el sidebar completo igual que hoy.
+ */
+
+/** `MODULOS_NAVEGACION` visibles para `rol`, EXCLUYENDO "/" Inicio (ver regla de conteo arriba). */
+export function modulosRealesVisiblesParaRol(rol: Rol | null | undefined): ModuloNavegacion[] {
+  return modulosVisiblesParaRol(rol).filter((m) => m.href !== "/");
+}
+
+/**
+ * Si `rol` tiene EXACTAMENTE UN modulo real visible (ver
+ * `modulosRealesVisiblesParaRol`), lo devuelve — es el modulo al que
+ * AppShell.tsx debe redirigir de inmediato y para el que debe omitir el
+ * sidebar. `null` en cualquier otro caso (0 modulos: rol sin permisos/sin
+ * sesion; o 2+: el usuario sigue viendo el sidebar completo, sin bypass).
+ */
+export function moduloUnicoVisibleParaRol(rol: Rol | null | undefined): ModuloNavegacion | null {
+  const reales = modulosRealesVisiblesParaRol(rol);
+  return reales.length === 1 ? reales[0] : null;
+}

@@ -13,12 +13,15 @@ import { test } from "node:test";
 import { ahora, getDb, resetDb, uid, UBICACION_PILOTO_ID } from "../../db/store";
 import type { Pago, Producto } from "../../domain/types";
 import {
+  actualizarLinea,
   agregarLinea,
   anularPedido,
   aplicarDescuento,
   avanzarEstadoCocina,
   crearPedido,
+  enviarACaja,
   enviarACocina,
+  marcarParaLlevar,
   obtenerPedido,
   reembolsar,
   registrarPagoEnPedido,
@@ -26,6 +29,9 @@ import {
 } from "../engine";
 import { ErrorDominio } from "../errores";
 import { getModoOffline, setModoOffline } from "../offlineState";
+import { abrirTurno } from "../turnos";
+
+const UBICACION_MESA_DEMO_ID = "ubic-austin-tx";
 
 function productoDemo(overrides: Partial<Producto> = {}): Producto {
   return {
@@ -231,5 +237,155 @@ test("errores de dominio: producto 86 (422), pedido inexistente (404) y descuent
         usuarioId: "user-cajero-demo",
       }),
     (err: unknown) => err instanceof ErrorDominio && err.status === 409
+  );
+});
+
+// ---------- Fase A (revision 2026-07-22): flujo cobrar-vs-cocina configurable ----------
+
+test("flujo mostrador (pay-first, default piloto): cobra ANTES de cocina; enviarACocina/avanzarEstadoCocina/enviarACaja no degradan el estado 'cobrado'; un segundo cobro se rechaza", () => {
+  resetDb();
+  const producto = productoDemo();
+  getDb().productos.push(producto);
+
+  const pedido = crearPedido({ ubicacionId: UBICACION_PILOTO_ID });
+  agregarLinea(pedido.id, { productoId: producto.id, cantidad: 1 });
+  assert.equal(pedido.estado, "abierto");
+
+  // Cobra completo MIENTRAS el pedido sigue "abierto" (nunca paso por cocina).
+  const saldo = saldoPendiente(pedido.id);
+  registrarPagoEnPedido(pedido.id, pagoBase(pedido.id, pedido.turnoId, { monto: saldo }));
+  assert.equal(pedido.estado, "cobrado", "el pago completo debe saldar el pedido directo desde 'abierto'");
+  assert.equal(pedido.enviadoACocinaEn, null, "todavia no se ha enviado a cocina");
+
+  // Enviar a cocina DESPUES de cobrado: no debe tocar pedido.estado.
+  enviarACocina(pedido.id);
+  assert.equal(pedido.estado, "cobrado", "enviarACocina no debe degradar un pedido ya cobrado");
+  assert.ok(pedido.enviadoACocinaEn !== null);
+  assert.ok(pedido.lineas.every((l) => l.estadoCocina === "recibido"));
+
+  // Enviar a cocina una segunda vez debe rechazarse (ya se envio).
+  assert.throws(
+    () => enviarACocina(pedido.id),
+    (err: unknown) => err instanceof ErrorDominio && err.codigo === "pedido_ya_enviado_a_cocina"
+  );
+
+  avanzarEstadoCocina(pedido.id); // recibido -> preparando
+  assert.equal(pedido.estado, "cobrado", "avanzarEstadoCocina no debe degradar un pedido ya cobrado");
+  avanzarEstadoCocina(pedido.id); // preparando -> listo
+
+  enviarACaja(pedido.id);
+  assert.equal(pedido.estado, "cobrado", "enviarACaja no debe degradar un pedido ya cobrado");
+  assert.ok(pedido.entregadoEn !== null);
+
+  // Un segundo intento de cobro sobre un pedido ya cobrado se rechaza (contrato ya existente).
+  assert.throws(
+    () => registrarPagoEnPedido(pedido.id, pagoBase(pedido.id, pedido.turnoId, { monto: 1 })),
+    (err: unknown) => err instanceof ErrorDominio && err.codigo === "pedido_ya_cobrado"
+  );
+});
+
+test("flujo mesa (clasico, ej. ubicacion demo Austin): NO se puede cobrar antes de 'entregado'; el camino completo sigue funcionando", () => {
+  resetDb();
+  const producto = productoDemo();
+  getDb().productos.push(producto);
+  // La ubicacion demo de Austin no trae un Turno sembrado (solo la piloto lo
+  // tiene, ver lib/db/store.ts); se abre uno aqui para poder crear pedidos.
+  abrirTurno({ ubicacionId: UBICACION_MESA_DEMO_ID, usuarioAperturaId: "user-gerente-demo" });
+
+  const pedido = crearPedido({ ubicacionId: UBICACION_MESA_DEMO_ID });
+  agregarLinea(pedido.id, { productoId: producto.id, cantidad: 1 });
+
+  // Intentar cobrar mientras sigue "abierto" (antes de pasar por cocina) se rechaza.
+  const saldo = saldoPendiente(pedido.id);
+  assert.throws(
+    () => registrarPagoEnPedido(pedido.id, pagoBase(pedido.id, pedido.turnoId, { monto: saldo })),
+    (err: unknown) => err instanceof ErrorDominio && err.codigo === "cobro_prematuro" && err.status === 409
+  );
+
+  enviarACocina(pedido.id);
+  assert.equal(pedido.estado, "enviadoCocina");
+  avanzarEstadoCocina(pedido.id); // -> enPreparacion
+  avanzarEstadoCocina(pedido.id); // -> listo
+  assert.equal(pedido.estado, "listo");
+  enviarACaja(pedido.id);
+  assert.equal(pedido.estado, "entregado");
+
+  // Ahora SI se puede cobrar (flujo clasico).
+  registrarPagoEnPedido(pedido.id, pagoBase(pedido.id, pedido.turnoId, { monto: saldo }));
+  assert.equal(pedido.estado, "cobrado");
+});
+
+test("bloqueo post-descuento: actualizarLinea se rechaza mientras el descuento este activo; se desbloquea al llevarlo a 0", () => {
+  resetDb();
+  const producto = productoDemo();
+  getDb().productos.push(producto);
+
+  const pedido = crearPedido({ ubicacionId: UBICACION_PILOTO_ID });
+  agregarLinea(pedido.id, { productoId: producto.id, cantidad: 2 });
+  const [linea] = pedido.lineas;
+
+  aplicarDescuento(pedido.id, {
+    tipo: "monto",
+    valor: 100,
+    motivo: "Cortesia gerencial",
+    usuarioId: "user-gerente-demo",
+  });
+  assert.ok(pedido.descuentoTotal > 0);
+
+  assert.throws(
+    () => actualizarLinea(pedido.id, linea.id, { cantidad: 3 }),
+    (err: unknown) => err instanceof ErrorDominio && err.codigo === "linea_bloqueada_por_descuento" && err.status === 409
+  );
+  assert.throws(
+    () => actualizarLinea(pedido.id, linea.id, { eliminar: true }),
+    (err: unknown) => err instanceof ErrorDominio && err.codigo === "linea_bloqueada_por_descuento"
+  );
+
+  // agregarLinea SI sigue permitido (decision de diseno documentada en engine.ts).
+  agregarLinea(pedido.id, { productoId: producto.id, cantidad: 1 });
+  assert.equal(pedido.lineas.length, 2);
+
+  // Remover el descuento (volver a pasar por la misma autorizacion) desbloquea.
+  aplicarDescuento(pedido.id, {
+    tipo: "monto",
+    valor: 0,
+    motivo: "Remocion para editar",
+    usuarioId: "user-gerente-demo",
+  });
+  assert.equal(pedido.descuentoTotal, 0);
+  actualizarLinea(pedido.id, linea.id, { cantidad: 5 });
+  assert.equal(linea.cantidad, 5);
+});
+
+test("para llevar: marcarParaLlevar agrega/quita el cargo de empaque automaticamente y es idempotente", () => {
+  resetDb();
+  const producto = productoDemo();
+  getDb().productos.push(producto);
+
+  const pedido = crearPedido({ ubicacionId: UBICACION_PILOTO_ID });
+  agregarLinea(pedido.id, { productoId: producto.id, cantidad: 1 });
+  const totalAntes = pedido.total;
+  assert.equal(pedido.empaqueTotal, 0);
+
+  marcarParaLlevar(pedido.id, { paraLlevar: true });
+  assert.equal(pedido.paraLlevar, true);
+  assert.ok(pedido.empaqueTotal! > 0);
+  assert.equal(pedido.total, totalAntes + pedido.empaqueTotal!);
+
+  const empaqueTrasPrimeraLlamada = pedido.empaqueTotal;
+  marcarParaLlevar(pedido.id, { paraLlevar: true }); // idempotente: no duplica el cargo
+  assert.equal(pedido.empaqueTotal, empaqueTrasPrimeraLlamada);
+
+  marcarParaLlevar(pedido.id, { paraLlevar: false });
+  assert.equal(pedido.paraLlevar, false);
+  assert.equal(pedido.empaqueTotal, 0);
+  assert.equal(pedido.total, totalAntes);
+});
+
+test("cajon de caja: no se puede crear un pedido sin un turno abierto para la ubicacion (bloqueo duro ya existente)", () => {
+  resetDb();
+  assert.throws(
+    () => crearPedido({ ubicacionId: "ubic-sin-turno-abierto-demo" }),
+    (err: unknown) => err instanceof ErrorDominio && err.codigo === "turno_no_abierto" && err.status === 409
   );
 });

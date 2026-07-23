@@ -9,9 +9,19 @@
  * inferior del sidebar izquierdo (ver components/shell/Sidebar.tsx,
  * `manejarLogout`) a pedido de producto, junto al nuevo boton "Gestionar
  * perfiles". El saludo al usuario SIGUE aqui.
+ *
+ * FASE A (revision 2026-07-22, seccion 2.5): cuando AppShell.tsx omite el
+ * Sidebar por completo (rol con un solo modulo real visible, ver
+ * `moduloUnicoVisibleParaRol` en lib/navigation/modulos.ts), pasa
+ * `sinSidebar=true` aqui. En ese caso:
+ *  - Se oculta el boton hamburguesa: no existe Sidebar, no hay drawer que abrir.
+ *  - Se agregan "Mi Perfil" y "Cerrar sesion" (que en el caso normal viven en
+ *    el bloque inferior del Sidebar) directo en esta barra, para que sigan
+ *    siendo alcanzables para ese usuario.
  */
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Notificacion } from "@/lib/domain/types";
 import { useSesion } from "@/lib/shell/SesionProvider";
@@ -27,12 +37,19 @@ import NotificacionesPanel from "./NotificacionesPanel";
 
 interface TopbarProps {
   onAbrirSidebar: () => void;
+  /** true si AppShell.tsx omitio el Sidebar completo para esta sesion (ver comentario de cabecera arriba). Default false (comportamiento sin cambios). */
+  sinSidebar?: boolean;
 }
 
-export default function Topbar({ onAbrirSidebar }: TopbarProps) {
-  const { usuarioActual } = useSesion();
+export default function Topbar({ onAbrirSidebar, sinSidebar = false }: TopbarProps) {
+  const { usuarioActual, logout } = useSesion();
   const { t } = useI18n();
   const router = useRouter();
+
+  function manejarLogout() {
+    logout();
+    router.push("/login");
+  }
 
   const [notificaciones, setNotificaciones] = useState<Notificacion[]>([]);
   const [panelAbierto, setPanelAbierto] = useState(false);
@@ -71,21 +88,23 @@ export default function Topbar({ onAbrirSidebar }: TopbarProps) {
   return (
     <header className="sticky top-0 z-20 flex min-h-[56px] items-center justify-between gap-2 border-b border-neutral-200 bg-white px-2 dark:border-neutral-800 dark:bg-neutral-900 sm:px-4">
       <div className="flex min-w-0 items-center gap-2">
-        <button
-          type="button"
-          onClick={onAbrirSidebar}
-          aria-label={t("sidebar.abrirMenu")}
-          className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-neutral-600 hover:bg-ck-cream dark:text-neutral-300 dark:hover:bg-neutral-800 lg:hidden"
-        >
-          <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6" aria-hidden="true">
-            <path
-              d="M4 6h16M4 12h16M4 18h16"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-            />
-          </svg>
-        </button>
+        {!sinSidebar && (
+          <button
+            type="button"
+            onClick={onAbrirSidebar}
+            aria-label={t("sidebar.abrirMenu")}
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-neutral-600 hover:bg-ck-cream dark:text-neutral-300 dark:hover:bg-neutral-800 lg:hidden"
+          >
+            <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6" aria-hidden="true">
+              <path
+                d="M4 6h16M4 12h16M4 18h16"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        )}
 
         {usuarioActual && (
           <span className="truncate text-sm font-semibold text-neutral-600 dark:text-neutral-300">
@@ -95,6 +114,25 @@ export default function Topbar({ onAbrirSidebar }: TopbarProps) {
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
+        {/* Fase A seccion 2.5: reubicados aqui desde el bloque inferior del
+            Sidebar (ver Sidebar.tsx) porque este usuario nunca lo vera. */}
+        {sinSidebar && usuarioActual && (
+          <>
+            <Link
+              href="/mi-perfil"
+              className="hidden rounded-lg px-2 py-1 text-sm font-semibold text-neutral-600 hover:bg-ck-cream dark:text-neutral-300 dark:hover:bg-neutral-800 sm:inline-block"
+            >
+              {t("sidebar.miPerfil")}
+            </Link>
+            <button
+              type="button"
+              onClick={manejarLogout}
+              className="rounded-lg px-2 py-1 text-sm font-bold text-ck-red hover:bg-ck-cream dark:hover:bg-neutral-800"
+            >
+              {t("topbar.cerrarSesion")}
+            </button>
+          </>
+        )}
         <SelectorIdioma />
         <ToggleTema />
 

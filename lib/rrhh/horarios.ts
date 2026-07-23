@@ -20,7 +20,7 @@
  * programa el horario (gerente), para que autorice el exceso a sabiendas.
  */
 
-import { getDb, uid } from "../db/store";
+import { getDb, registrarEvento, uid } from "../db/store";
 import type { HorarioTurno } from "../domain/types";
 import { obtenerEmpleado } from "./empleados";
 import { ErrorRrhh } from "./errores";
@@ -74,6 +74,22 @@ function validarHora(valor: string | undefined, campo: string): string {
     throw new ErrorRrhh("hora_invalida", `${campo} debe tener formato HH:MM (24h)`, 422);
   }
   return valor;
+}
+
+/**
+ * Valida que el rango horaInicioProgramada/horaFinProgramada tenga duracion
+ * positiva (mismo dia, DEMO: no soporta turnos que cruzan medianoche).
+ * Compartida por `crearHorario` y `editarHorario` para no duplicar la regla.
+ */
+function validarRangoHoras(horaInicioProgramada: string, horaFinProgramada: string): void {
+  const duracionMin = minutosHorario({ horaInicioProgramada, horaFinProgramada });
+  if (duracionMin <= 0) {
+    throw new ErrorRrhh(
+      "rango_horas_invalido",
+      "horaFinProgramada debe ser posterior a horaInicioProgramada (mismo dia)",
+      422
+    );
+  }
 }
 
 export interface FiltroHorarios {
@@ -148,14 +164,7 @@ export function crearHorario(input: NuevoHorarioInput): HorarioCreado {
     throw new ErrorRrhh("ubicacion_no_encontrada", `Ubicacion ${ubicacionId} no existe`, 422);
   }
 
-  const duracionMin = minutosHorario({ horaInicioProgramada, horaFinProgramada });
-  if (duracionMin <= 0) {
-    throw new ErrorRrhh(
-      "rango_horas_invalido",
-      "horaFinProgramada debe ser posterior a horaInicioProgramada (mismo dia)",
-      422
-    );
-  }
+  validarRangoHoras(horaInicioProgramada, horaFinProgramada);
 
   const horario: HorarioTurno = {
     id: uid(),
@@ -168,6 +177,98 @@ export function crearHorario(input: NuevoHorarioInput): HorarioCreado {
   getDb().horariosTurno.push(horario);
 
   const minutosTotalesSemana = minutosProgramadosSemana(input.empleadoId, fecha);
+
+  return { horario, minutosTotalesSemana };
+}
+
+/** Busca un HorarioTurno por id (o `undefined` si no existe). */
+export function obtenerHorario(horarioId: string): HorarioTurno | undefined {
+  return getDb().horariosTurno.find((h) => h.id === horarioId);
+}
+
+export interface EditarHorarioInput {
+  fecha?: string; // YYYY-MM-DD
+  horaInicioProgramada?: string; // HH:MM 24h
+  horaFinProgramada?: string; // HH:MM 24h
+}
+
+export interface HorarioEditado {
+  horario: HorarioTurno;
+  /** Minutos totales programados para la semana (lunes-domingo) de la fecha FINAL del horario, incluyendo el propio horario editado. Mismo proposito informativo que `HorarioCreado.minutosTotalesSemana`. */
+  minutosTotalesSemana: number;
+}
+
+/**
+ * Edita un HorarioTurno ya asignado (fecha y/o horas). Cubre el hueco
+ * reportado en la revision 2026-07-22 (seccion 2.2): antes de esta funcion se
+ * podia CREAR un horario pero nunca corregirlo (typo de hora, cambio de
+ * turno, etc.) sin pasar directo por el store. Reusa la misma validacion de
+ * formato/rango que `crearHorario` (validarFecha/validarHora/validarRangoHoras)
+ * para no duplicar reglas, y registra un evento de auditoria dedicado
+ * ("cambioHorarioEmpleado"), mismo espiritu que "Si cambia rolId, registra
+ * evento de auditoria dedicado" en `editarEmpleado` (lib/rrhh/empleados.ts).
+ *
+ * NO bloquea si el resultado supera 40h/semana programadas (mismo criterio
+ * "informativo, no bloqueante" que `crearHorario`); devuelve
+ * `minutosTotalesSemana` para que la UI decida si avisa.
+ */
+export function editarHorario(horarioId: string, cambios: EditarHorarioInput): HorarioEditado {
+  const horario = obtenerHorario(horarioId);
+  if (!horario) {
+    throw new ErrorRrhh("horario_no_encontrado", `Horario ${horarioId} no existe`, 404);
+  }
+
+  const fechaAnterior = horario.fecha;
+  const horaInicioAnterior = horario.horaInicioProgramada;
+  const horaFinAnterior = horario.horaFinProgramada;
+
+  const fecha = cambios.fecha !== undefined ? validarFecha(cambios.fecha, "fecha") : horario.fecha;
+  const horaInicioProgramada =
+    cambios.horaInicioProgramada !== undefined
+      ? validarHora(cambios.horaInicioProgramada, "horaInicioProgramada")
+      : horario.horaInicioProgramada;
+  const horaFinProgramada =
+    cambios.horaFinProgramada !== undefined
+      ? validarHora(cambios.horaFinProgramada, "horaFinProgramada")
+      : horario.horaFinProgramada;
+
+  validarRangoHoras(horaInicioProgramada, horaFinProgramada);
+
+  const huboCambio =
+    fecha !== fechaAnterior ||
+    horaInicioProgramada !== horaInicioAnterior ||
+    horaFinProgramada !== horaFinAnterior;
+
+  horario.fecha = fecha;
+  horario.horaInicioProgramada = horaInicioProgramada;
+  horario.horaFinProgramada = horaFinProgramada;
+
+  if (huboCambio) {
+    const empleado = obtenerEmpleado(horario.empleadoId);
+    registrarEvento({
+      ubicacionId: horario.ubicacionId,
+      // Mismo criterio que cambioRolEmpleado/cambioTarifaEmpleado (ver
+      // lib/rrhh/empleados.ts): esta demo aun no propaga el usuario gerente
+      // que hizo el cambio, asi que se atribuye al Usuario de login del
+      // propio empleado afectado (o null si no tiene todavia).
+      usuarioId: empleado?.usuarioId ?? null,
+      tipo: "cambioHorarioEmpleado",
+      agregadoTipo: "HorarioTurno",
+      agregadoId: horario.id,
+      motivo: `Edicion de horario: ${fechaAnterior} ${horaInicioAnterior}-${horaFinAnterior} -> ${fecha} ${horaInicioProgramada}-${horaFinProgramada}`,
+      payload: {
+        empleadoId: horario.empleadoId,
+        fechaAnterior,
+        horaInicioAnterior,
+        horaFinAnterior,
+        fechaNueva: fecha,
+        horaInicioNueva: horaInicioProgramada,
+        horaFinNueva: horaFinProgramada,
+      },
+    });
+  }
+
+  const minutosTotalesSemana = minutosProgramadosSemana(horario.empleadoId, fecha);
 
   return { horario, minutosTotalesSemana };
 }

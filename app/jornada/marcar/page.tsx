@@ -21,9 +21,20 @@
  * fallos consecutivos bloquean el metodo facial 5 minutos, con PIN de
  * respaldo como plan B) -> (3) codigo TOTP de 6 digitos de la pantalla
  * central -> confirmacion.
+ *
+ * AGREGADO (Fase A, QR rotativo de /jornada/pantalla): si esta pagina se abre
+ * con `?codigo=XXXXXX` en la URL (por escanear el QR de la pantalla central
+ * en vez de leer los 6 digitos a mano), ese valor precarga el campo de codigo
+ * en el paso (3) — el empleado sigue pasando por verificacion facial igual
+ * que siempre, el QR solo ahorra la digitacion manual del codigo, no
+ * reemplaza ningun paso de seguridad. Si el codigo del QR ya roto para cuando
+ * el empleado llega a ese paso (mismo riesgo que digitarlo a mano y demorarse
+ * mas de ~20s), la validacion server-side lo rechaza igual y el campo queda
+ * editable para escribir el codigo vigente.
  */
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useI18n } from "@/lib/shell/I18nProvider";
 import { textoErrorApi } from "@/lib/i18n/erroresApi";
 import { useSesion } from "@/lib/shell/SesionProvider";
@@ -66,9 +77,35 @@ function formatearMmSs(totalSegundos: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+/**
+ * Envuelve el contenido real en <Suspense>: `useSearchParams()` (usado abajo
+ * para leer `?codigo=` del QR escaneado) exige un limite de Suspense cuando
+ * se usa directo en un componente de pagina (requisito de Next.js App Router
+ * para el prerenderizado estatico), aunque toda esta pagina ya es "use client".
+ */
 export default function MarcarJornadaPage() {
   const { t } = useI18n();
+  return (
+    <Suspense
+      fallback={
+        <main className="grid min-h-screen place-items-center bg-ck-cream dark:bg-neutral-950">
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">{t("shell.cargando")}</p>
+        </main>
+      }
+    >
+      <MarcarJornadaContenido />
+    </Suspense>
+  );
+}
+
+function MarcarJornadaContenido() {
+  const { t } = useI18n();
   const { usuarioActual } = useSesion();
+  const searchParams = useSearchParams();
+  // Codigo pre-cargado desde el QR de /jornada/pantalla (?codigo=XXXXXX), si
+  // se llego a esta pagina escaneandolo. `null` si se entro sin ese query
+  // param (flujo normal, digitando los 6 digitos a mano en el paso 3).
+  const codigoDesdeQr = searchParams.get("codigo");
 
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [cargandoEmpleados, setCargandoEmpleados] = useState(true);
@@ -143,6 +180,16 @@ export default function MarcarJornadaPage() {
       vivo = false;
     };
   }, []);
+
+  // Precarga el codigo del QR escaneado al llegar al paso (3) "codigo", solo
+  // si el campo todavia esta vacio (no pisa lo que el empleado ya haya
+  // escrito/editado a mano). No hace nada si se entro sin `?codigo=` en la URL.
+  useEffect(() => {
+    if (paso === "codigo" && codigoDesdeQr && !codigo) {
+      setCodigo(codigoDesdeQr.replace(/\D/g, "").slice(0, 6));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paso, codigoDesdeQr]);
 
   // Cuenta regresiva del bloqueo: solo UI, la fuente de verdad sigue siendo el servidor.
   useEffect(() => {

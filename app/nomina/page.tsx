@@ -10,6 +10,14 @@ import { useI18n } from "@/lib/shell/I18nProvider";
 import { textoErrorApi } from "@/lib/i18n/erroresApi";
 import FondoFoto from "@/components/shell/FondoFoto";
 
+// DECISION DE ALCANCE (S-17, ver docs/requisitos.md y
+// docs/analisis-revision-20260722-modulos-innovacion-seguridad.md): esta
+// pantalla YA NO muestra bruto/retencion/neto (ReciboDePago.brutoCentavos/
+// retencionCentavos/netoCentavos siempre vienen en 0, ver
+// lib/nomina/calculo.ts) ni tiene ninguna accion de "pagar". Es solo un
+// reporte de horas (regulares/extra) + propinas de referencia para
+// alimentar un sistema de nomina/ERP externo.
+
 function fechaISOHaceDias(dias: number): string {
   const d = new Date();
   d.setDate(d.getDate() - dias);
@@ -23,12 +31,17 @@ function formatearMinutos(min: number): string {
 }
 
 /**
- * /nomina — correr nomina de un periodo y ver recibos de pago (nomina-pos).
+ * /nomina — Reporte de Horas: genera y consulta el reporte de horas
+ * trabajadas (regulares/extra) + propinas de referencia por periodo
+ * (nomina-pos). NO calcula tarifa/hora, retencion ni neto a pagar, y NO
+ * tiene ninguna accion de "pagar" — decision de alcance S-17 (ver
+ * docs/requisitos.md y README-DEMO.md). Pensado como insumo de referencia
+ * para un sistema de nomina/ERP externo.
  *
- * DEMO: tasas de retencion y regla de horas extra (>40h/semana) son
- * ficticias/simplificadas; ver README-DEMO.md y lib/nomina/calculo.ts.
+ * DEMO: la regla de horas extra (>40h/semana) sigue siendo una
+ * simplificacion; ver README-DEMO.md y lib/nomina/calculo.ts.
  */
-export default function NominaPage() {
+export default function ReporteDeHorasPage() {
   const { t } = useI18n();
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [recibos, setRecibos] = useState<ReciboDePago[]>([]);
@@ -169,9 +182,6 @@ export default function NominaPage() {
                   <th className="p-3 text-right">{t("nomina.colHorasRegulares")}</th>
                   <th className="p-3 text-right">{t("nomina.colHorasExtra")}</th>
                   <th className="p-3 text-right">{t("nomina.colPropinas")}</th>
-                  <th className="p-3 text-right">{t("nomina.colBruto")}</th>
-                  <th className="p-3 text-right">{t("nomina.colRetencion")}</th>
-                  <th className="p-3 text-right">{t("nomina.colNeto")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -184,18 +194,11 @@ export default function NominaPage() {
                     <td className="p-3 text-right">{formatearMinutos(r.horasRegularesMin)}</td>
                     <td className="p-3 text-right">{formatearMinutos(r.horasExtraMin)}</td>
                     <td className="p-3 text-right">{formatearDinero(r.propinasCentavos)}</td>
-                    <td className="p-3 text-right">{formatearDinero(r.brutoCentavos)}</td>
-                    <td className="p-3 text-right text-neutral-600 dark:text-neutral-400">
-                      -{formatearDinero(r.retencionCentavos)}
-                    </td>
-                    <td className="p-3 text-right font-bold text-ck-dark dark:text-neutral-100">
-                      {formatearDinero(r.netoCentavos)}
-                    </td>
                   </tr>
                 ))}
                 {recibos.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="p-6 text-center text-neutral-500 dark:text-neutral-400">
+                    <td colSpan={5} className="p-6 text-center text-neutral-500 dark:text-neutral-400">
                       {t("nomina.sinRecibos")}
                     </td>
                   </tr>

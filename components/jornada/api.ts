@@ -201,3 +201,23 @@ export async function marcarPorPinRespaldo(body: MarcarPorPinBody): Promise<Marc
   });
   return marcaje;
 }
+
+// ---- Codigo de autorizacion gerencial diario (ver lib/jornada/codigoGerencial.ts) ----
+
+/** Codigo de autorizacion gerencial vigente HOY de la ubicacion, para el panel gerencial. */
+export async function obtenerCodigoGerencialVigente(ubicacionId: string): Promise<CodigoVigente> {
+  return solicitar<CodigoVigente>(
+    `/jornada/codigo-gerencial?ubicacionId=${encodeURIComponent(ubicacionId)}`
+  );
+}
+
+/** Valida un codigo de autorizacion gerencial sin revelar el codigo vigente. */
+export async function validarCodigoGerencial(
+  ubicacionId: string,
+  codigo: string
+): Promise<{ valido: boolean }> {
+  return solicitar<{ valido: boolean }>("/jornada/codigo-gerencial/validar", {
+    method: "POST",
+    body: JSON.stringify({ ubicacionId, codigo }),
+  });
+}

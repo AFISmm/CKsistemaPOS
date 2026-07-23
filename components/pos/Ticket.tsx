@@ -20,6 +20,22 @@ interface Props {
    * la provee para abrir CobroModal.
    */
   onAbrirCobro?: () => void;
+  /**
+   * AGREGADO (Fase A, "empaque automatico para llevar"): opcional; cuando se
+   * omite, el toggle de "Para llevar" simplemente no se renderiza. Llama a
+   * `marcarParaLlevar` (via components/pos/api.ts) al alternar.
+   */
+  onCambiarParaLlevar?: (paraLlevar: boolean) => void;
+  /** true mientras la llamada de "para llevar" esta en curso (deshabilita el toggle). */
+  paraLlevarEnviando?: boolean;
+  /**
+   * AGREGADO (Fase A, flujo mostrador pay-first): oculta el boton manual
+   * "Enviar a Cocina". En modo "mostrador" el envio a cocina lo dispara
+   * AUTOMATICAMENTE el cobro exitoso (ver app/pos/nuevo/page.tsx), asi que el
+   * boton manual dejaria de tener sentido en ese flujo — pero el codigo de
+   * `onEnviarACocina` sigue existiendo intacto para el flujo "mesa".
+   */
+  ocultarBotonEnviarACocina?: boolean;
 }
 
 /**
@@ -38,6 +54,9 @@ export default function Ticket({
   onEnviarACocina,
   onAbrirDescuento,
   onAbrirCobro,
+  onCambiarParaLlevar,
+  paraLlevarEnviando,
+  ocultarBotonEnviarACocina,
 }: Props) {
   const { t } = useI18n();
 
@@ -59,6 +78,16 @@ export default function Ticket({
   const puedeEnviarACocina =
     hayLineas && (pedido.estado === "abierto" || pedido.estado === "enviadoCocina");
   const yaEnviado = pedido.estado !== "abierto";
+  // BLOQUEO POST-DESCUENTO (ver lib/sales/engine.ts `actualizarLinea`): una
+  // vez que hay un descuento activo, cantidad/quitar quedan deshabilitados en
+  // la UI (ademas del guard real del backend) hasta que se remueva el
+  // descuento.
+  const bloqueadaPorDescuento = pedido.descuentoTotal > 0;
+  const empaqueTotal = pedido.empaqueTotal ?? 0;
+  // El toggle de "para llevar" solo tiene sentido mientras el pedido sigue
+  // editable (mismo criterio que `asegurarPedidoEditable` en el motor): una
+  // vez cobrado/cancelado ya no se puede alternar.
+  const puedeAlternarParaLlevar = pedido.estado !== "cobrado" && pedido.estado !== "cancelado";
 
   return (
     <aside className="flex w-full flex-col rounded-2xl border border-neutral-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900 lg:w-96">
@@ -84,9 +113,14 @@ export default function Ticket({
             {t("pos.ticket.tocaProducto")}
           </p>
         )}
+        {bloqueadaPorDescuento && (
+          <p className="mb-3 rounded-lg bg-ck-gold/10 p-2 text-xs font-semibold text-ck-gold">
+            {t("pos.ticket.lineasBloqueadasPorDescuento")}
+          </p>
+        )}
         <ul className="space-y-3">
           {pedido.lineas.map((linea) => {
-            const bloqueada = actualizandoLineaId === linea.id;
+            const bloqueada = actualizandoLineaId === linea.id || bloqueadaPorDescuento;
             return (
               <li key={linea.id} className="rounded-lg border border-neutral-100 p-3 dark:border-neutral-800">
                 <div className="flex items-start justify-between gap-2">
@@ -174,6 +208,12 @@ export default function Ticket({
           <span>{t("pos.ticket.propina")}</span>
           <span>{formatearDinero(pedido.propinaTotal)}</span>
         </div>
+        {empaqueTotal > 0 && (
+          <div className="flex justify-between text-neutral-600 dark:text-neutral-300">
+            <span>{t("pos.ticket.empaque")}</span>
+            <span>{formatearDinero(empaqueTotal)}</span>
+          </div>
+        )}
         <div className="flex justify-between border-t border-neutral-200 pt-2 text-lg font-bold text-ck-dark dark:border-neutral-700 dark:text-neutral-100">
           <span>{t("pos.ticket.total")}</span>
           <span>{formatearDinero(pedido.total)}</span>
@@ -181,6 +221,21 @@ export default function Ticket({
       </div>
 
       <div className="space-y-2 p-4 pt-0">
+        {onCambiarParaLlevar && (
+          <label className="mb-1 flex items-center justify-between rounded-xl border border-neutral-200 px-3 py-2 text-sm dark:border-neutral-700">
+            <span className="font-semibold text-ck-dark dark:text-neutral-100">
+              {t("pos.ticket.paraLlevar")}
+            </span>
+            <input
+              type="checkbox"
+              checked={pedido.paraLlevar ?? false}
+              disabled={!!paraLlevarEnviando || !puedeAlternarParaLlevar}
+              onChange={(e) => onCambiarParaLlevar(e.target.checked)}
+              className="h-5 w-5 accent-ck-red"
+              aria-label={t("pos.ticket.paraLlevar")}
+            />
+          </label>
+        )}
         <button
           type="button"
           onClick={onAbrirDescuento}
@@ -189,14 +244,16 @@ export default function Ticket({
         >
           {t("pos.ticket.aplicarDescuento")}
         </button>
-        <button
-          type="button"
-          onClick={onEnviarACocina}
-          disabled={!puedeEnviarACocina || enviandoACocina}
-          className="w-full rounded-xl bg-ck-dark py-3 text-base font-bold text-white active:scale-95 disabled:opacity-40"
-        >
-          {enviandoACocina ? t("pos.ticket.enviando") : t("pos.ticket.enviarACocina")}
-        </button>
+        {!ocultarBotonEnviarACocina && (
+          <button
+            type="button"
+            onClick={onEnviarACocina}
+            disabled={!puedeEnviarACocina || enviandoACocina}
+            className="w-full rounded-xl bg-ck-dark py-3 text-base font-bold text-white active:scale-95 disabled:opacity-40"
+          >
+            {enviandoACocina ? t("pos.ticket.enviando") : t("pos.ticket.enviarACocina")}
+          </button>
+        )}
         {onAbrirCobro && (
           <button
             type="button"

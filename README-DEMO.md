@@ -30,10 +30,30 @@ npm run dev     # http://localhost:3000
 ```
 
 Rutas: `/` (inicio) · `/pos` (cajero) · `/kds` (cocina) · `/reportes` (reportes) ·
-`/empleados` (personal) · `/nomina` (nomina) · `/jornada/pantalla` (pantalla central
-de la tienda) · `/jornada/marcar` (celular del empleado, chequeo de inicio de jornada).
+`/empleados` (personal) · `/nomina` (reporte de horas) · `/jornada/pantalla` (pantalla
+central de la tienda) · `/jornada/marcar` (celular del empleado, chequeo de inicio de
+jornada).
 
-## Modulo de Empleados y Nomina
+## Modulo de Empleados y Reporte de Horas (antes "Nomina")
+
+> **DECISION DE ALCANCE (S-17, 2026-07-22)** — ver `docs/requisitos.md` S-17 y
+> `docs/analisis-revision-20260722-modulos-innovacion-seguridad.md`. En la
+> llamada de revision del 2026-07-22, dos revisores con experiencia operativa
+> real en restaurantes (Diego Cataño y Mateo Franco) senalaron que calcular
+> tarifas/pago reales y tener un boton de "pagar" dentro del POS es un riesgo
+> financiero/legal real: *"si alguien cambia los valores de tarifa aqui
+> podriamos terminar pagando 3-4x mas, el proyecto estaria muerto"* (cita
+> directa de un revisor). Ademas, "normalmente la nomina arranca en el ERP",
+> nunca en el POS. **Decision: se retira del alcance de produccion el calculo
+> real de tarifa/hora, neto a pagar y cualquier boton de "pagar"**; el modulo
+> se reduce a un **reporte de referencia de horas trabajadas** (regulares +
+> overtime, mas propinas de referencia) pensado para alimentar un sistema de
+> nomina/ERP externo. Esta demo ya refleja esa reduccion: la pantalla
+> `/nomina` (label del sidebar: "Reporte de Horas" / "Hours Report") ya NO
+> muestra bruto/retencion/neto ni tiene ninguna accion de pago; `ReciboDePago`
+> (ver `lib/domain/types.ts`) conserva esos 3 campos en el tipo unicamente por
+> compatibilidad (siempre en 0, marcados `@deprecated`) para no romper codigo
+> existente bajo el plazo ajustado del proyecto.
 
 Dos "sombreros" con responsabilidades separadas (codigo, tipos y comentarios de
 cada archivo lo dejan explicito):
@@ -43,9 +63,10 @@ cada archivo lo dejan explicito):
   `lib/domain/types.ts` (Empleado, HorarioTurno, Marcaje), `lib/data/rrhh-seed.ts`,
   `lib/rrhh/*`, `app/api/v1/empleados/**`, `app/api/v1/asistencia/**`,
   `components/empleados/*`, `app/empleados/*`.
-- **nomina-pos**: calculo de nomina a partir de la asistencia (horas
-  regulares/extra), propinas, retencion fiscal DEMO y recibos de pago.
-  Archivos: `lib/nomina/*`, `app/api/v1/nomina/**`, `components/nomina/api.ts`,
+- **nomina-pos**: genera el reporte de horas a partir de la asistencia (horas
+  regulares/extra) y suma propinas de referencia. **Ya NO calcula tarifa,
+  retencion fiscal ni neto a pagar** (ver decision de alcance arriba). Archivos:
+  `lib/nomina/*`, `app/api/v1/nomina/**`, `components/nomina/api.ts`,
   `app/nomina/*`.
 
 ### Que se construyo
@@ -65,12 +86,16 @@ cada archivo lo dejan explicito):
   `tardanza` (calculada contra el `HorarioTurno` del dia, si existe, con 10 min
   de tolerancia DEMO). Se audita una alerta (`alertaAsistencia`) solo cuando
   hay tardanza, fuera de geofence o identidad no verificada.
-- **Nomina**: `lib/nomina/calculo.ts` empareja marcajes entrada/salida
-  (`lib/rrhh/asistencia.ts:emparejarIntervalos`), agrupa minutos por semana
-  ISO (lunes-domingo) dentro del periodo pedido, separa horas regulares vs.
-  extra (regla DEMO: >40h/semana, estilo FLSA federal, igual para FL y TX),
-  suma propinas del periodo y aplica una retencion DEMO. Genera un
-  `ReciboDePago` por empleado (auditado con evento `nominaGenerada`).
+- **Reporte de Horas (antes "Nomina")**: `lib/nomina/calculo.ts` empareja
+  marcajes entrada/salida (`lib/rrhh/asistencia.ts:emparejarIntervalos`),
+  agrupa minutos por semana ISO (lunes-domingo) dentro del periodo pedido,
+  separa horas regulares vs. extra (regla DEMO: >40h/semana, estilo FLSA
+  federal, igual para FL y TX) y suma propinas del periodo **como dato de
+  referencia**. **Ya NO calcula tarifa, retencion ni neto a pagar** (decision
+  de alcance S-17, ver arriba). Genera un `ReciboDePago` (reporte de horas)
+  por empleado, auditado con el mismo evento historico `nominaGenerada` (se
+  conserva el nombre del evento y su valor de auditoria — "se genero un
+  reporte de horas, por quien, cuando" — aunque el modulo ya no calcule pago).
 
 ### Decision de modelado: como se ligan propinas a un empleado
 
@@ -96,8 +121,8 @@ proposito los `Usuario` demo ya sembrados (`user-cajero-demo`,
 | Area | Que es demo | Reemplazar por |
 |------|-------------|----------------|
 | **Reloj checador** | Marcaje manual desde la UI de `/empleados/[id]`; `dentroDeGeofence`/`identidadVerificada` son checkboxes que SIMULAN el resultado. | Integracion real con el proveedor de time-clock (ej. **XmartClock** u otro): webhook o pull periodico de eventos de marcaje, con geofencing GPS real y verificacion de identidad (ej. reconocimiento facial) del lado del proveedor. Este modulo modela el mismo contrato de datos (empleado, timestamp, ubicacion, flags de alerta) para que el reemplazo sea principalmente de "fuente de los Marcaje", no de modelo. |
-| **Retencion fiscal** | 10% "federal" fijo y ficticio sobre el bruto (propinas no se retienen en esta demo). FL/TX sin impuesto estatal a ingreso personal (eso si es real). | Tabla de retencion federal real (W-4, brackets), reglas de FICA/Medicare, y confirmacion legal/contable de como se retienen propinas reportadas. |
-| **Horas extra** | Regla unica ">40h/semana = 1.5x" (estilo FLSA federal), igual para FL y TX. | Validar reglas estatales/locales aplicables y politica interna de horas extra (ej. doble tiempo en feriados, reglas de descanso). |
+| **Calculo de pago (retirado del alcance)** | Esta demo YA NO calcula tarifa/hora, retencion fiscal ni neto a pagar (decision de alcance S-17, ver arriba); `ReciboDePago.brutoCentavos/retencionCentavos/netoCentavos` se mantienen en el tipo pero siempre en 0. | No aplica — esta parte se retira deliberadamente del alcance de produccion del POS. El calculo real de pago (tarifa, retencion W-4/FICA/Medicare, neto) debe hacerse en un sistema de nomina/ERP dedicado, que consuma este reporte de horas como insumo. |
+| **Horas extra** | Regla unica ">40h/semana = 1.5x" (estilo FLSA federal), igual para FL y TX. Sigue siendo deuda tecnica de la DEMO como *dato de referencia*, aunque ya no alimente un calculo de pago propio. | Validar reglas estatales/locales aplicables y politica interna de horas extra (ej. doble tiempo en feriados, reglas de descanso) — relevante para el sistema de nomina/ERP externo que reciba este reporte. |
 | **Emparejamiento de marcajes** | Se asume que los marcajes de un empleado alternan correctamente entrada/salida (lo valida `registrarMarcaje`); un turno sin marcaje de salida dentro del periodo se descarta del calculo. | Deteccion/alerta de "olvido de marcaje" con reglas de negocio (ej. auto-cierre a las N horas) y correccion manual auditada. |
 | **Propinas -> empleado** | Se infiere via `Turno.usuarioAperturaId` (ver decision de modelado arriba). | Registrar el cajero/empleado directamente en `Pago` o `LineaDePedido`. |
 | **PIN / auth del empleado** | Mismo hash de demo que el resto del sistema (`demo:<pin>`). | bcrypt/argon2 (S-10, ya documentado). |
@@ -284,7 +309,11 @@ disponible en toda la app, con entrada/salida por texto o por voz.
 /lib
   /domain/types.ts        contrato de tipos      [orquestador]  (no editar firmas)
   /db/store.ts            almacen en memoria     [orquestador]  (no redefinir colecciones)
-  /data/catalog.ts        semilla de catalogo    [menu-inventario-pos]
+  /data/catalog-real.ts   semilla de catalogo REAL (usada por store.ts), importada
+                          de Recetario_Simplificado.xlsx via scripts/importar-
+                          recetario.js — ver ese script para el detalle    [menu-inventario-pos]
+  /data/catalog.ts        semilla DEMO original (fabricada) — ya NO se usa desde
+                          store.ts, queda solo como referencia/fallback   [menu-inventario-pos]
   /data/rrhh-seed.ts      semilla de personal    [rrhh-personal-pos]
   /inventory/*            logica de inventario   [menu-inventario-pos]
   /sales/*                motor de ticket/total  [backend-ventas-pos]

@@ -267,3 +267,20 @@ export async function crearHorario(body: NuevoHorarioBody): Promise<HorarioCread
     body: JSON.stringify(body),
   });
 }
+
+export interface EditarHorarioBody {
+  fecha?: string; // YYYY-MM-DD
+  horaInicioProgramada?: string; // HH:MM 24h
+  horaFinProgramada?: string; // HH:MM 24h
+}
+
+/** Edita un horario ya asignado (ej. corregir hora de entrada/salida de un dia ya programado). */
+export async function editarHorario(
+  id: string,
+  body: EditarHorarioBody
+): Promise<HorarioCreadoResponse> {
+  return solicitar<HorarioCreadoResponse>(`/horarios/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}

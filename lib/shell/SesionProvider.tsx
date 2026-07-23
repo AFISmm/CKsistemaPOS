@@ -22,6 +22,7 @@ import {
 } from "react";
 import type { Rol } from "@/lib/domain/types";
 import {
+  hayTurnoAbiertoDeUsuario,
   iniciarSesionPin,
   obtenerSesionActual,
   type UsuarioSinPin,
@@ -38,7 +39,20 @@ interface SesionContextValue {
   /** true mientras se resuelve la sesion guardada (evita parpadeos/redirects prematuros). */
   cargando: boolean;
   login: (email: string, pin: string) => Promise<void>;
-  logout: () => void;
+  /**
+   * Cierra sesion — SALVO que el usuario actual tenga un `Turno` (cajon de
+   * caja) todavia abierto que el mismo abrio (ver `hayTurnoAbiertoDeUsuario`,
+   * gate de "no permitir clock-out con turno abierto", revision 2026-07-22).
+   * En ese caso muestra un aviso y NO limpia la sesion. Es `async` (a
+   * diferencia de la version anterior) porque ese chequeo requiere una
+   * llamada de red; `Sidebar.tsx` (fuera del alcance editable de esta tarea)
+   * la invoca sin `await` y navega a "/login" de inmediato de todas formas —
+   * eso esta CONTEMPLADO: `/login` ya redirige solo de vuelta a "/" si
+   * `usuarioActual` sigue activo (ver app/login/page.tsx), asi que un
+   * clock-out bloqueado simplemente rebota al usuario de regreso a la app
+   * tras el aviso, en vez de dejarlo "a medio salir".
+   */
+  logout: () => Promise<void>;
   /**
    * Vuelve a resolver usuario+rol contra el servidor para el usuario
    * logueado actual (no cambia de sesion). Uso previsto: "Mi Perfil"
@@ -103,7 +117,25 @@ export function SesionProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  function logout() {
+  async function logout(): Promise<void> {
+    if (usuarioActual) {
+      const bloqueadoPorTurno = await hayTurnoAbiertoDeUsuario(
+        usuarioActual.id,
+        usuarioActual.ubicacionId
+      );
+      if (bloqueadoPorTurno) {
+        try {
+          window.alert(
+            "No puedes cerrar sesion: todavia tienes un turno de caja abierto. " +
+              "Corre el cierre Z (arqueo/cierre de turno) antes de salir."
+          );
+        } catch {
+          // Sin `window.alert` disponible (SSR/tests): igual no limpiamos la
+          // sesion, que es lo que realmente importa del bloqueo.
+        }
+        return;
+      }
+    }
     setUsuarioActual(null);
     try {
       window.localStorage.removeItem(CLAVE_STORAGE);

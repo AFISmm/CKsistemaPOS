@@ -8,6 +8,7 @@ import { useI18n } from "@/lib/shell/I18nProvider";
 import { textoErrorApi } from "@/lib/i18n/erroresApi";
 import { obtenerCatalogoMenu } from "@/components/menu/api";
 import NuevoProductoModal from "@/components/menu/NuevoProductoModal";
+import EditarRecetaModal from "@/components/menu/EditarRecetaModal";
 import FondoFoto from "@/components/shell/FondoFoto";
 
 /**
@@ -27,6 +28,7 @@ export default function MenuPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [mostrarAlta, setMostrarAlta] = useState(false);
+  const [productoEditandoReceta, setProductoEditandoReceta] = useState<Producto | null>(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -108,6 +110,7 @@ export default function MenuPage() {
                         <th className="p-3">{t("menu.colPrecio")}</th>
                         <th className="p-3">{t("menu.colGravable")}</th>
                         <th className="p-3">{t("menu.colEstado")}</th>
+                        <th className="p-3">{t("menu.colAcciones")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -128,6 +131,15 @@ export default function MenuPage() {
                               </span>
                             )}
                           </td>
+                          <td className="p-3">
+                            <button
+                              type="button"
+                              onClick={() => setProductoEditandoReceta(p)}
+                              className="rounded-lg border border-neutral-300 px-2 py-1 text-xs font-semibold text-neutral-600 dark:border-neutral-600 dark:text-neutral-300"
+                            >
+                              {t("menu.editarReceta")}
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -143,6 +155,14 @@ export default function MenuPage() {
           categorias={categorias}
           onCreado={agregarProductoALista}
           onCancelar={() => setMostrarAlta(false)}
+        />
+      )}
+
+      {productoEditandoReceta && (
+        <EditarRecetaModal
+          producto={productoEditandoReceta}
+          onGuardado={() => setProductoEditandoReceta(null)}
+          onCancelar={() => setProductoEditandoReceta(null)}
         />
       )}
     </main>

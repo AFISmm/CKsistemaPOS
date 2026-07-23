@@ -7,7 +7,7 @@
  * cliente). Tipos de dominio importados con `import type`.
  */
 
-import type { Empleado, Notificacion, Rol, Usuario } from "@/lib/domain/types";
+import type { Empleado, Notificacion, Rol, Turno, Usuario } from "@/lib/domain/types";
 
 const BASE_URL = "/api/v1";
 
@@ -163,4 +163,29 @@ export async function cambiarPinUsuario(usuarioId: string, pin: string): Promise
     { method: "PATCH", body: JSON.stringify({ pin }) }
   );
   return usuario;
+}
+
+/**
+ * AGREGADO (Fase A, revision 2026-07-22, "apertura/cierre de caja con
+ * bloqueos duros" — no permitir clock-out con turno abierto): true si
+ * `usuarioId` es quien ABRIO (`Turno.usuarioAperturaId`) un `Turno` que
+ * SIGUE abierto en `ubicacionId`. Usado por `SesionProvider.logout()` como
+ * gate de cierre de sesion: el cajero que abrio el cajon de caja no puede
+ * cerrar sesion (clock-out) mientras ese turno siga abierto — debe correr el
+ * cierre Z primero. Si la consulta falla (sin red), devuelve `false`
+ * (fail-open): en esta demo es preferible dejar salir a un cajero antes que
+ * dejarlo bloqueado para siempre por un problema de red ajeno a su turno.
+ */
+export async function hayTurnoAbiertoDeUsuario(
+  usuarioId: string,
+  ubicacionId: string
+): Promise<boolean> {
+  try {
+    const { turnos } = await solicitar<{ turnos: Turno[] }>(
+      `/turnos?ubicacionId=${encodeURIComponent(ubicacionId)}&estado=abierto&usuarioAperturaId=${encodeURIComponent(usuarioId)}`
+    );
+    return turnos.length > 0;
+  } catch {
+    return false;
+  }
 }

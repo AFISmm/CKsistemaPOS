@@ -33,6 +33,14 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
       : Number(montoTexto) > 0;
   const formularioValido = valorValido && motivo.trim().length >= 3;
 
+  // Fase A (revision 2026-07-22 seccion 2.1, "fijar linea tras descuento"):
+  // una vez aplicado, el pedido bloquea cambios de cantidad/quitar (ver
+  // lib/sales/engine.ts `actualizarLinea`). La UNICA forma de desbloquear es
+  // volver a pasar por ESTE mismo modal y llevar el descuento a $0 — este
+  // atajo lo deja a un clic (con motivo pre-llenado) en vez de obligar al
+  // gerente a escribir "0.00" a mano.
+  const hayDescuentoActivo = pedido.descuentoTotal > 0;
+
   function confirmar() {
     if (!formularioValido || enviando) return;
     if (tipo === "porcentaje") {
@@ -42,6 +50,11 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
     }
   }
 
+  function quitarDescuento() {
+    if (enviando) return;
+    onConfirmar({ tipo: "monto", valor: 0, motivo: t("pos.descuento.motivoQuitar") });
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl dark:bg-neutral-900">
@@ -49,6 +62,20 @@ export default function DescuentoModal({ pedido, enviando, error, onConfirmar, o
         <p className="mb-4 text-xs text-neutral-600 dark:text-neutral-400">
           {t("pos.descuento.subtotalActual", { monto: formatearDinero(pedido.subtotal) })}
         </p>
+
+        {hayDescuentoActivo && (
+          <div className="mb-4 rounded-xl bg-ck-gold/10 p-3 text-xs text-ck-dark dark:text-neutral-100">
+            <p className="mb-2 font-semibold">{t("pos.descuento.avisoBloqueoActivo")}</p>
+            <button
+              type="button"
+              disabled={enviando}
+              onClick={quitarDescuento}
+              className="w-full rounded-lg border border-ck-gold py-2 text-xs font-bold text-ck-gold disabled:opacity-40"
+            >
+              {t("pos.descuento.quitarDescuento")}
+            </button>
+          </div>
+        )}
 
         <div className="mb-3 flex gap-2">
           <button

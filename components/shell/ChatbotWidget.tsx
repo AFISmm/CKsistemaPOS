@@ -25,6 +25,36 @@
  *    llamada de red involucrada.
  *  - La voz (entrada STT / salida TTS) es 100% del navegador, ver
  *    lib/chatbot/voz.ts — sin backend ni claves de API.
+ *
+ * MODO "MANOS LIBRES" (Fase A, revision 2026-07-22 seccion 3.2): ademas del
+ * selector Texto/Audio de arriba (que solo controla si la respuesta se LEE en
+ * voz alta), un boton separado activa una sesion de conversacion encadenada:
+ * escuchar -> responder -> hablar -> volver a escuchar, sin que el usuario
+ * tenga que volver a tocar el boton de microfono entre turnos.
+ *
+ * DECISION DE DISENO (documentada a proposito, ver enunciado de la tarea):
+ * NO se usa `continuous: true` de `SpeechRecognition` para escucha
+ * ininterrumpida real. `continuous` deja el reconocedor abierto indefinidamente
+ * incluso sin voz, lo cual en la practica es POCO CONFIABLE entre navegadores
+ * (Chrome lo corta solo tras un rato de silencio de todas formas) y consume
+ * bateria/mic de forma continua sin necesidad. En su lugar: activar "manos
+ * libres" arranca UNA sesion de escucha (igual que tocar el microfono
+ * manualmente); en cuanto el reconocedor entrega una transcripcion FINAL, se
+ * envia el mensaje, se lee la respuesta en voz alta (SIEMPRE, sin importar el
+ * toggle Texto/Audio: manos libres implica audio) y, al terminar de leerla
+ * (evento `onend` de la sintesis de voz, ver `hablar()` en lib/chatbot/voz.ts),
+ * se arranca automaticamente el SIGUIENTE turno de escucha. El usuario "activa
+ * la sesion con un solo tap" y esta se mantiene sola entre turnos hasta que la
+ * desactiva (o cierra el panel del chat, ver el efecto que la apaga al cerrar).
+ * No hay reintento automatico si el reconocimiento de voz de UN turno falla
+ * (evento `onerror`, ej. silencio prolongado o permiso denegado): evita bucles
+ * de reintento sobre un error persistente; el usuario puede tocar el
+ * microfono de nuevo o reactivar manos libres.
+ *
+ * Requiere AMBAS capacidades (STT para escuchar Y TTS para responder en voz);
+ * reusa exactamente `sttDisponible()`/`ttsDisponible()` (mismo patron de
+ * deteccion que el boton de microfono normal y el toggle "Audio" ya
+ * existentes, ver lib/chatbot/voz.ts) — no se duplica el chequeo de otra forma.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -65,6 +95,8 @@ export default function ChatbotWidget() {
   const [modo, setModo] = useState<ModoRespuesta>("texto");
   const [escuchando, setEscuchando] = useState(false);
   const [errorVoz, setErrorVoz] = useState(false);
+  // Modo "manos libres" (ver comentario de cabecera del componente).
+  const [manosLibres, setManosLibres] = useState(false);
 
   // Soporte de navegador: se calcula una sola vez en el cliente (evita
   // desajuste de hidratacion SSR/CSR, ya que en el servidor no hay `window`).
@@ -75,11 +107,31 @@ export default function ChatbotWidget() {
   const mensajesRef = useRef<HTMLDivElement>(null);
   const reconocedorRef = useRef<ReconocedorVoz | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ref espejo de `manosLibres`: los callbacks de `hablar()`/`reconocedor` se
+  // crean en el momento de iniciar esa lectura/escucha y pueden ejecutarse
+  // varios turnos despues — leer el STATE ahi capturaria el valor de ESE
+  // render (stale closure) si el usuario desactivo manos libres mientras
+  // tanto. La ref siempre tiene el valor mas reciente.
+  const manosLibresRef = useRef(false);
 
   useEffect(() => {
     setPuedeStt(sttDisponible());
     setPuedeTts(ttsDisponible());
   }, []);
+
+  useEffect(() => {
+    manosLibresRef.current = manosLibres;
+  }, [manosLibres]);
+
+  // Cerrar el panel apaga manos libres (y cualquier escucha/lectura en curso):
+  // no tiene sentido seguir escuchando por el microfono con el chat cerrado.
+  useEffect(() => {
+    if (!abierto && manosLibresRef.current) {
+      setManosLibres(false);
+      reconocedorRef.current?.abort();
+      detenerLectura();
+    }
+  }, [abierto]);
 
   // Si el navegador no soporta lectura en voz alta, el modo "audio" no tiene
   // sentido (no habria nada distinto que hacer con el) — se fuerza "texto".
@@ -137,7 +189,16 @@ export default function ChatbotWidget() {
       const respuesta = responder(texto, idioma);
       setMensajes((prev) => [...prev, { id: idMensaje(), autor: "bot", texto: respuesta }]);
       setPensando(false);
-      if (modo === "audio") hablar(respuesta, idioma);
+      // Manos libres implica leer la respuesta en voz alta SIEMPRE (sin eso
+      // no habria forma de saber que responder sin mirar la pantalla), sin
+      // importar el toggle Texto/Audio de arriba.
+      if (modo === "audio" || manosLibresRef.current) {
+        hablar(respuesta, idioma, () => {
+          // Encadena el siguiente turno de escucha SOLO si manos libres sigue
+          // activo en este momento (pudo haberse apagado mientras se leia).
+          if (manosLibresRef.current) iniciarEscucha();
+        });
+      }
     }, demoraMs);
   }
 
@@ -146,13 +207,14 @@ export default function ChatbotWidget() {
     manejarEnviar(entradaTexto);
   }
 
-  function alternarMicrofono() {
-    if (!puedeStt) return;
-
-    if (escuchando) {
-      reconocedorRef.current?.stop();
-      return;
-    }
+  /**
+   * Arranca UNA sesion de reconocimiento de voz (comun al boton de microfono
+   * manual y al encadenado de manos libres, ver comentario de cabecera).
+   * No hace nada si STT no esta soportado, ya se esta escuchando, o el bot
+   * esta "pensando" (evita solaparse con la respuesta en curso).
+   */
+  function iniciarEscucha() {
+    if (!puedeStt || pensando) return;
 
     const reconocedor = crearReconocedorVoz(idioma);
     if (!reconocedor) return;
@@ -173,6 +235,9 @@ export default function ChatbotWidget() {
     reconocedor.onerror = () => {
       setErrorVoz(true);
       setEscuchando(false);
+      // Deliberadamente SIN reintento automatico aqui (ver decision de diseno
+      // en el comentario de cabecera): un error de reconocimiento (silencio
+      // prolongado, permiso denegado, etc.) no debe convertirse en un bucle.
     };
     reconocedor.onend = () => {
       setEscuchando(false);
@@ -181,6 +246,35 @@ export default function ChatbotWidget() {
 
     reconocedor.start();
     setEscuchando(true);
+  }
+
+  function alternarMicrofono() {
+    if (!puedeStt) return;
+
+    if (escuchando) {
+      reconocedorRef.current?.stop();
+      return;
+    }
+
+    iniciarEscucha();
+  }
+
+  /** Activa/desactiva el modo manos libres (ver comentario de cabecera del componente). */
+  function alternarManosLibres() {
+    if (!(puedeStt && puedeTts)) return;
+
+    const siguiente = !manosLibres;
+    setManosLibres(siguiente);
+
+    if (!siguiente) {
+      // Se desactiva: no dejar una escucha/lectura colgando de la sesion anterior.
+      reconocedorRef.current?.abort();
+      detenerLectura();
+    } else if (!escuchando && !pensando) {
+      // Se activa: arranca el primer turno de escucha de inmediato (tap unico
+      // para iniciar la sesion, ver decision de diseno documentada arriba).
+      iniciarEscucha();
+    }
   }
 
   function manejarSugerencia(texto: string) {
@@ -282,6 +376,28 @@ export default function ChatbotWidget() {
               >
                 {t("chatbot.modoAudio")}
               </button>
+
+              {/* Modo manos libres: solo tiene sentido si el navegador soporta
+                  STT (para escuchar); si ademas no soporta TTS, se muestra
+                  deshabilitado con el mismo mensaje que ya usa el boton
+                  "Audio" de arriba (reusa `puedeTts`, no duplica el chequeo). */}
+              {puedeStt && (
+                <button
+                  type="button"
+                  onClick={alternarManosLibres}
+                  aria-pressed={manosLibres}
+                  aria-label={manosLibres ? t("chatbot.manosLibresDesactivar") : t("chatbot.manosLibresActivar")}
+                  disabled={!puedeTts}
+                  title={puedeTts ? undefined : t("chatbot.ttsNoSoportado")}
+                  className={`ml-auto min-h-[32px] rounded-full px-3 text-xs font-bold transition ${
+                    manosLibres
+                      ? "bg-ck-red text-white"
+                      : "text-neutral-600 hover:bg-ck-cream dark:text-neutral-300 dark:hover:bg-neutral-800"
+                  } ${!puedeTts ? "cursor-not-allowed opacity-40" : ""}`}
+                >
+                  {t("chatbot.manosLibres")}
+                </button>
+              )}
             </div>
 
             <div ref={mensajesRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
@@ -346,6 +462,9 @@ export default function ChatbotWidget() {
             )}
             {errorVoz && (
               <p className="px-4 pt-2 text-[11px] text-ck-red">{t("chatbot.errorVoz")}</p>
+            )}
+            {manosLibres && !escuchando && !pensando && (
+              <p className="px-4 pt-2 text-[11px] font-semibold text-ck-red">{t("chatbot.manosLibresActivo")}</p>
             )}
             {escuchando && (
               <p className="px-4 pt-2 text-[11px] font-semibold text-ck-red">{t("chatbot.escuchando")}</p>

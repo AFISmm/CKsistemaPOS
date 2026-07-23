@@ -61,7 +61,13 @@ function moverStockPorPedido(
       }
 
       const anterior = stock.cantidadActual;
-      stock.cantidadActual = anterior - delta; // signo ya incluido en delta
+      // FIX (Fase A, 2026-07-22, encontrado al construir auto-86 — ver reporte
+      // de la tarea): esta linea decia `anterior - delta`, lo que en realidad
+      // INVERTIA el movimiento (una venta con signo=-1 produce delta negativo,
+      // asi que "anterior - delta" SUMABA en vez de restar — una venta subia
+      // el stock y un reembolso lo bajaba). `delta` ya incluye el signo
+      // correcto (ver arriba), asi que sumarlo directo es lo que hace falta.
+      stock.cantidadActual = anterior + delta;
       stock.actualizadoEn = ahora();
 
       registrarEvento({
@@ -78,10 +84,74 @@ function moverStockPorPedido(
           insumoId: ri.insumoId,
           cantidadAnterior: anterior,
           cantidadNueva: stock.cantidadActual,
-          movimiento: -delta,
+          movimiento: delta,
         },
       });
+
+      // Auto-86 (Fase A, 2026-07-22 — idea de innovacion de la llamada de
+      // revision): si este movimiento dejo el insumo en cero (o menos), 86
+      // automaticamente cualquier producto cuya receta dependa de el.
+      verificarAuto86PorInsumo(ri.insumoId, pedido.ubicacionId);
     }
+  }
+}
+
+/**
+ * Si el stock ACTUAL de `insumoId` en `ubicacionId` esta en cero (o menos),
+ * marca 86 (agotado, `disponible86 = false`) todo Producto cuya Receta ACTIVA
+ * dependa de ese insumo — sin esperar a que un gerente lo haga a mano (ver
+ * docs/analisis-revision-20260722-modulos-innovacion-seguridad.md, idea de
+ * innovacion "auto-86 al llegar a stock cero"). No hace nada si el stock sigue
+ * por encima de cero, o si el producto ya estaba 86.
+ *
+ * Se exporta ademas de usarse desde `moverStockPorPedido` (venta/reembolso)
+ * para que cualquier futuro punto de ajuste manual de inventario (permiso
+ * "inventario.ajustar", hoy sin endpoint propio) pueda invocar la misma
+ * verificacion tras mutar `Stock.cantidadActual`.
+ *
+ * Nota de alcance: `Modificador` no tiene receta/insumos propios en el modelo
+ * de dominio (solo `Producto` -> `Receta` -> `RecetaInsumo`), asi que esta
+ * funcion solo puede auto-86 productos, no modificadores individuales. No hay
+ * auto-reactivacion al reponer stock en este alcance: la llamada de revision
+ * pidio especificamente el 86 automatico a stock cero; reactivar se deja como
+ * decision gerencial manual (marcar86) para no revertir por accidente un 86
+ * que un gerente haya puesto por otro motivo (ej. producto descontinuado).
+ */
+export function verificarAuto86PorInsumo(insumoId: string, ubicacionId: string): void {
+  const db = getDb();
+
+  const stock = db.stock.find((s) => s.ubicacionId === ubicacionId && s.insumoId === insumoId);
+  if (!stock || stock.cantidadActual > 0) return;
+
+  const recetaIdsConEsteInsumo = new Set(
+    db.recetaInsumos.filter((ri) => ri.insumoId === insumoId).map((ri) => ri.recetaId)
+  );
+  if (recetaIdsConEsteInsumo.size === 0) return;
+
+  const recetasAfectadas = db.recetas.filter((r) => r.activo && recetaIdsConEsteInsumo.has(r.id));
+
+  for (const receta of recetasAfectadas) {
+    const producto = db.productos.find((p) => p.id === receta.productoId);
+    if (!producto || !producto.disponible86) continue; // no existe o ya esta 86
+
+    producto.disponible86 = false;
+
+    registrarEvento({
+      ubicacionId,
+      usuarioId: null,
+      tipo: "producto86",
+      agregadoTipo: "Producto",
+      agregadoId: producto.id,
+      motivo: "Producto marcado 86 automaticamente: insumo agotado (stock <= 0)",
+      payload: {
+        productoId: producto.id,
+        insumoId,
+        cantidadActualInsumo: stock.cantidadActual,
+        disponibleAnterior: true,
+        disponibleNuevo: false,
+        automatico: true,
+      },
+    });
   }
 }
 

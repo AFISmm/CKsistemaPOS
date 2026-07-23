@@ -125,7 +125,12 @@ export default function LoginPage() {
       await login(emailLimpio, pin);
       router.replace("/");
     } catch (err) {
-      if (err instanceof ErrorApi && err.status === 401) {
+      if (err instanceof ErrorApi && err.status === 423) {
+        // Bloqueo por intentos fallidos de PIN (ver lib/auth/bloqueoPin.ts):
+        // mensaje distinto y explicito, no el generico de PIN incorrecto,
+        // aunque en ESTE intento el PIN enviado fuera el correcto.
+        setError(t("login.errorBloqueado"));
+      } else if (err instanceof ErrorApi && err.status === 401) {
         setError(t("login.errorInvalido"));
       } else {
         setError(t("login.errorGenerico"));

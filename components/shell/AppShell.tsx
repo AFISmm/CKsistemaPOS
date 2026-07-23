@@ -41,17 +41,40 @@
  *    sincronizada. Ver el comentario de cabecera en ChatbotWidget.tsx para el
  *    razonamiento de negocio de esa exclusion. No es un modulo de sidebar
  *    (ver lib/navigation/modulos.ts).
+ *
+ * FASE A (revision 2026-07-22, seccion 2.5 "saltar el sidebar para roles de
+ * un solo modulo"): si el rol logueado tiene EXACTAMENTE UN modulo "real"
+ * visible (ver `moduloUnicoVisibleParaRol` en lib/navigation/modulos.ts para
+ * la regla exacta de conteo — "/" Inicio NUNCA cuenta), este componente:
+ *  1. Redirige de inmediato a la ruta de ESE modulo en cuanto detecta que el
+ *     usuario esta parado en "/" (tanto recien llegado del login, que siempre
+ *     hace `router.replace("/")`, como si navega ahi manualmente despues) —
+ *     asi nunca ve el dashboard de tarjetas de app/page.tsx.
+ *  2. Omite por completo el `<Sidebar>` para el resto de la sesion (no solo
+ *     en "/"): un usuario con un solo modulo no tiene ninguna otra pagina a la
+ *     que navegar desde el sidebar, asi que mostrarlo seria una distraccion
+ *     vacia (hallazgo real de la llamada de revision con el equipo).
+ *     "Mi Perfil" y "Cerrar sesion" (que normalmente viven en el bloque
+ *     inferior del Sidebar, ver Sidebar.tsx) se reubican en el Topbar en este
+ *     caso para que sigan siendo alcanzables (ver prop `sinSidebar` de
+ *     Topbar.tsx) — de lo contrario este usuario no tendria forma de salir de
+ *     su sesion ni de editar su propio perfil.
+ *  Un usuario con 2+ modulos reales (ej. gerente) NUNCA activa este bypass:
+ *  sigue viendo el sidebar completo exactamente igual que antes de esta
+ *  seccion.
  */
 
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useSesion } from "@/lib/shell/SesionProvider";
 import { useI18n } from "@/lib/shell/I18nProvider";
+import { moduloUnicoVisibleParaRol } from "@/lib/navigation/modulos";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
 import ChatbotWidget from "./ChatbotWidget";
 
 const RUTA_LOGIN = "/login";
+const RUTA_INICIO = "/";
 
 /** Rutas del chequeo de inicio de jornada (etapa 2): exentas del guard de sesion y se renderizan "desnudas" (ver comentario arriba). */
 const RUTAS_SIN_GUARD = ["/jornada/pantalla", "/jornada/marcar"];
@@ -66,12 +89,29 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const esLogin = pathname === RUTA_LOGIN;
   const esRutaSinGuard = esLogin || RUTAS_SIN_GUARD.some((r) => pathname?.startsWith(r));
 
+  // Fase A seccion 2.5: modulo unico del rol (null si tiene 0 o 2+ modulos
+  // reales, ver doc de moduloUnicoVisibleParaRol). Se recalcula en cada
+  // render a partir del rol; MODULOS_NAVEGACION es estatico asi que el href
+  // resultante es estable mientras el rol no cambie.
+  const moduloUnico = moduloUnicoVisibleParaRol(usuarioActual?.rol);
+  const enInicioConModuloUnico = pathname === RUTA_INICIO && !!moduloUnico;
+
   // Guard DEMO: sin sesion y fuera de /login o de una ruta exenta -> redirige a /login.
   useEffect(() => {
     if (!cargando && !usuarioActual && !esRutaSinGuard) {
       router.replace(RUTA_LOGIN);
     }
   }, [cargando, usuarioActual, esRutaSinGuard, router]);
+
+  // Fase A seccion 2.5: si el usuario aterriza en "/" (dashboard de tarjetas)
+  // y su rol solo tiene un modulo real, lo mandamos directo a ese modulo —
+  // cubre tanto el redirect post-login (que siempre apunta a "/") como una
+  // navegacion manual posterior a "/".
+  useEffect(() => {
+    if (enInicioConModuloUnico && moduloUnico) {
+      router.replace(moduloUnico.href);
+    }
+  }, [enInicioConModuloUnico, moduloUnico, router]);
 
   // Cierra el drawer movil del sidebar al navegar.
   useEffect(() => {
@@ -82,7 +122,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
     return <>{children}</>;
   }
 
-  if (cargando || !usuarioActual) {
+  // Mientras cargando/sin sesion, O mientras se resuelve el redirect de
+  // arriba (para no mostrar ni un parpadeo del dashboard de tarjetas antes de
+  // saltar a la pantalla del modulo unico), se muestra el mismo loader.
+  if (cargando || !usuarioActual || enInicioConModuloUnico) {
     return (
       <main className="grid min-h-screen place-items-center bg-ck-cream dark:bg-neutral-950">
         <p className="text-sm text-neutral-500 dark:text-neutral-400">{t("shell.cargando")}</p>
@@ -92,9 +135,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-ck-cream dark:bg-neutral-950">
-      <Sidebar abierto={sidebarAbierto} onCerrar={() => setSidebarAbierto(false)} />
-      <div className="flex min-h-screen flex-col lg:pl-64">
-        <Topbar onAbrirSidebar={() => setSidebarAbierto(true)} />
+      {!moduloUnico && (
+        <Sidebar abierto={sidebarAbierto} onCerrar={() => setSidebarAbierto(false)} />
+      )}
+      <div className={`flex min-h-screen flex-col ${moduloUnico ? "" : "lg:pl-64"}`}>
+        <Topbar onAbrirSidebar={() => setSidebarAbierto(true)} sinSidebar={!!moduloUnico} />
         <main className="min-w-0 flex-1">{children}</main>
       </div>
       {/* Etapa 3: widget flotante de chat de ayuda. Montado aqui (y no en una
